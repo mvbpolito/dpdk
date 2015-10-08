@@ -683,7 +683,7 @@ map_all_segments(void)
 			RTE_LOG(ERR, EAL, "Not enough memory segments!\n");
 			return -1;
 		}
-		
+
 		if (mcfg->memseg[j].addr == NULL)
 			break;
 	}
@@ -842,9 +842,9 @@ rte_eal_ivshmem_obj_init(void)
 		/* avoid inserting duplicated rings */
 		if(rte_ring_lookup(r->name) != NULL)
 			continue;
-		
+
 		rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
-		
+
 		te = rte_zmalloc("RING_TAILQ_ENTRY", sizeof(*te), 0);
 		if (te == NULL) {
 			RTE_LOG(ERR, EAL, "Cannot allocate ring tailq entry!\n");
@@ -854,12 +854,12 @@ rte_eal_ivshmem_obj_init(void)
 		te->data = (void *) r;
 
 		TAILQ_INSERT_TAIL(ring_list, te, next);
-		
+
 		rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
-		
+
 		RTE_LOG(DEBUG, EAL, "Found ring: '%s' at %p\n", r->name, mz->addr);
 	}
-	
+
 
 #ifdef RTE_LIBRTE_IVSHMEM_DEBUG
 	rte_memzone_dump(stdout);
@@ -873,16 +873,16 @@ static int
 pci_dev_already_saved(char * path)
 {
 	uint32_t i;
-		
+
 	if(!ivshmem_config)
 		return 0;	///XXX: what could be a better error message?
-	
+
 	/* look for all the registered devices comparing with it */
 	for(i = 0; i < ivshmem_config->pci_devs_idx; i++)
 		if(!strncmp(path, ivshmem_config->pci_devs[i].path, 
 			sizeof(ivshmem_config->pci_devs[i].path)))
 			return 1;
-	
+
 	return 0;
 }
 
@@ -913,7 +913,7 @@ int rte_eal_ivshmem_init(void)
 		TAILQ_FOREACH(dev, &pci_device_list, next) {
 
 			if (is_ivshmem_device(dev)) {
-				
+
 				/* IVSHMEM memory is always on BAR2 */
 				res = &dev->mem_resource[2];
 
@@ -925,7 +925,7 @@ int rte_eal_ivshmem_init(void)
 				snprintf(path, sizeof(path), IVSHMEM_RESOURCE_PATH,
 						dev->addr.domain, dev->addr.bus, dev->addr.devid,
 						dev->addr.function);
-						
+
 				/* if it is already saved */
 				if(pci_dev_already_saved(path))
 				{
