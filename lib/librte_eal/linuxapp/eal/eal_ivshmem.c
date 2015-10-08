@@ -632,8 +632,8 @@ map_all_segments(void)
 		if (ioremap_addr == 0) {
 			RTE_LOG(ERR, EAL, "Cannot find ioremap addr!\n");
 			return -1;
-		}	
-		
+		}
+
 		/* work out alignments */
 		align = seg->entry.mz.addr_64 -
 				RTE_ALIGN_FLOOR(seg->entry.mz.addr_64, 0x1000);
@@ -654,10 +654,10 @@ map_all_segments(void)
 		ms_tbl[k].entry.offset = seg->entry.offset - align;
 
 		memcpy(&ms_tbl[k].entry.mz, &mz, sizeof(struct rte_memzone));
-		
+
 		/* the segment was already processed */
 		seg->processed = 1;
-		k++;		
+		k++;
 	}
 
 	/* clean up the segments */
@@ -681,10 +681,10 @@ map_all_segments(void)
 		if(i == RTE_MAX_MEMSEG)
 		{
 			RTE_LOG(ERR, EAL, "Not enough memory segments!\n");
-			return -1;			
+			return -1;
 		}
 		
-		if (mcfg->memseg[j].addr == NULL) 		
+		if (mcfg->memseg[j].addr == NULL)
 			break;
 	}
 
@@ -821,7 +821,7 @@ rte_eal_ivshmem_obj_init(void)
 			}
 		}
 
-		mcfg->memzone_cnt++;		
+		mcfg->memzone_cnt++;
 	}
 
 	/* find rings */
@@ -878,12 +878,12 @@ pci_dev_already_saved(char * path)
 		return 0;	///XXX: what could be a better error message?
 	
 	/* look for all the registered devices comparing with it */
-	for(i = 0; i < ivshmem_config->pci_devs_idx; i++)	
+	for(i = 0; i < ivshmem_config->pci_devs_idx; i++)
 		if(!strncmp(path, ivshmem_config->pci_devs[i].path, 
 			sizeof(ivshmem_config->pci_devs[i].path)))
-			return 1;		
-		
-	return 0;	
+			return 1;
+	
+	return 0;
 }
 
 /* initialize ivshmem structures */
@@ -913,7 +913,7 @@ int rte_eal_ivshmem_init(void)
 		TAILQ_FOREACH(dev, &pci_device_list, next) {
 
 			if (is_ivshmem_device(dev)) {
-							
+				
 				/* IVSHMEM memory is always on BAR2 */
 				res = &dev->mem_resource[2];
 
