@@ -88,6 +88,8 @@ struct ivshmem_segment {
 	struct rte_ivshmem_metadata_entry entry;
 	uint64_t align;
 	char path[PATH_MAX];
+	/* 1 if already considered in the mapping process */
+	uint8_t processed;
 };
 struct ivshmem_shared_config {
 	struct ivshmem_segment segment[RTE_MAX_MEMSEG];
@@ -95,7 +97,7 @@ struct ivshmem_shared_config {
 	struct ivshmem_pci_device pci_devs[RTE_LIBRTE_IVSHMEM_MAX_PCI_DEVS];
 	uint32_t pci_devs_idx;
 };
-static struct ivshmem_shared_config * ivshmem_config;
+static struct ivshmem_shared_config * ivshmem_config = NULL;
 static int memseg_idx;
 static int pagesz;
 
@@ -589,7 +591,7 @@ map_all_segments(void)
 	struct rte_mem_config * mcfg;
 	struct ivshmem_segment * seg;
 	int fd, fd_zero;
-	unsigned i, j;
+	unsigned i, j, k;
 	struct rte_memzone mz;
 	struct rte_memseg ms;
 	void * base_addr;
@@ -605,7 +607,7 @@ map_all_segments(void)
 	/* first, build a table of memsegs to map, to avoid failed mmaps due to
 	 * overlaps
 	 */
-	for (i = 0; i < ivshmem_config->segment_idx && i <= RTE_MAX_MEMSEG; i++) {
+	for (i = 0, k = 0; i < ivshmem_config->segment_idx && i <= RTE_MAX_MEMSEG; i++) {
 		if (i == RTE_MAX_MEMSEG) {
 			RTE_LOG(ERR, EAL, "Too many segments requested!\n");
 			return -1;
@@ -613,8 +615,11 @@ map_all_segments(void)
 
 		seg = &ivshmem_config->segment[i];
 
+		if(seg->processed)
+			continue;
+
 		/* copy segment to table */
-		memcpy(&ms_tbl[i], seg, sizeof(struct ivshmem_segment));
+		memcpy(&ms_tbl[k], seg, sizeof(struct ivshmem_segment));
 
 		/* find ioremap addr */
 		for (j = 0; j < DIM(ivshmem_config->pci_devs); j++) {
@@ -627,15 +632,15 @@ map_all_segments(void)
 		if (ioremap_addr == 0) {
 			RTE_LOG(ERR, EAL, "Cannot find ioremap addr!\n");
 			return -1;
-		}
-
+		}	
+		
 		/* work out alignments */
 		align = seg->entry.mz.addr_64 -
 				RTE_ALIGN_FLOOR(seg->entry.mz.addr_64, 0x1000);
 		len = RTE_ALIGN_CEIL(seg->entry.mz.len + align, 0x1000);
 
 		/* save original alignments */
-		ms_tbl[i].align = align;
+		ms_tbl[k].align = align;
 
 		/* create a memory zone */
 		mz.addr_64 = seg->entry.mz.addr_64 - align;
@@ -646,13 +651,17 @@ map_all_segments(void)
 		/* find true physical address */
 		mz.ioremap_addr = ioremap_addr + seg->entry.offset - align;
 
-		ms_tbl[i].entry.offset = seg->entry.offset - align;
+		ms_tbl[k].entry.offset = seg->entry.offset - align;
 
-		memcpy(&ms_tbl[i].entry.mz, &mz, sizeof(struct rte_memzone));
+		memcpy(&ms_tbl[k].entry.mz, &mz, sizeof(struct rte_memzone));
+		
+		/* the segment was already processed */
+		seg->processed = 1;
+		k++;		
 	}
 
 	/* clean up the segments */
-	memseg_idx = cleanup_segments(ms_tbl, ivshmem_config->segment_idx);
+	memseg_idx = cleanup_segments(ms_tbl, k);
 
 	if (memseg_idx < 0)
 		return -1;
@@ -664,6 +673,19 @@ map_all_segments(void)
 	if (fd_zero < 0) {
 		RTE_LOG(ERR, EAL, "Cannot open /dev/zero: %s\n", strerror(errno));
 		return -1;
+	}
+
+	/* look for the last free memseg */
+	for (j = 0; j <= RTE_MAX_MEMSEG; j++)
+	{
+		if(i == RTE_MAX_MEMSEG)
+		{
+			RTE_LOG(ERR, EAL, "Not enough memory segments!\n");
+			return -1;			
+		}
+		
+		if (mcfg->memseg[j].addr == NULL) 		
+			break;
 	}
 
 	/* create memsegs and put them into DPDK memory */
@@ -721,9 +743,8 @@ map_all_segments(void)
 		ms.ioremap_addr += seg->align;
 		ms.len -= seg->align;
 
-		/* at this point, the rest of DPDK memory is not initialized, so we
-		 * expect memsegs to be empty */
-		memcpy(&mcfg->memseg[i], &ms,
+		/* copy memseg starting from the last free one */
+		memcpy(&mcfg->memseg[j + i], &ms,
 				sizeof(struct rte_memseg));
 
 		close(fd);
@@ -767,6 +788,10 @@ rte_eal_ivshmem_obj_init(void)
 
 		seg = &ivshmem_config->segment[i];
 
+		/* avoid duplicanting memzones */
+		if(rte_memzone_lookup(seg->entry.mz.name) != NULL)
+			continue;
+
 		/* add memzone */
 		if (mcfg->memzone_cnt == RTE_MAX_MEMZONE) {
 			RTE_LOG(ERR, EAL, "No more memory zones available!\n");
@@ -796,14 +821,16 @@ rte_eal_ivshmem_obj_init(void)
 			}
 		}
 
-		mcfg->memzone_cnt++;
+		mcfg->memzone_cnt++;		
 	}
-
-	rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
 
 	/* find rings */
 	for (i = 0; i < mcfg->memzone_cnt; i++) {
 		mz = &mcfg->memzone[i];
+
+		/* avoid looking in memzones that are not ivshmem */
+		if(mz->ioremap_addr == 0)
+			continue;
 
 		/* check if memzone has a ring prefix */
 		if (strncmp(mz->name, RTE_RING_MZ_PREFIX,
@@ -812,6 +839,12 @@ rte_eal_ivshmem_obj_init(void)
 
 		r = (struct rte_ring*) (mz->addr_64);
 
+		/* avoid inserting duplicated rings */
+		if(rte_ring_lookup(r->name) != NULL)
+			continue;
+		
+		rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
+		
 		te = rte_zmalloc("RING_TAILQ_ENTRY", sizeof(*te), 0);
 		if (te == NULL) {
 			RTE_LOG(ERR, EAL, "Cannot allocate ring tailq entry!\n");
@@ -821,10 +854,12 @@ rte_eal_ivshmem_obj_init(void)
 		te->data = (void *) r;
 
 		TAILQ_INSERT_TAIL(ring_list, te, next);
-
+		
+		rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
+		
 		RTE_LOG(DEBUG, EAL, "Found ring: '%s' at %p\n", r->name, mz->addr);
 	}
-	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
+	
 
 #ifdef RTE_LIBRTE_IVSHMEM_DEBUG
 	rte_memzone_dump(stdout);
@@ -832,6 +867,23 @@ rte_eal_ivshmem_obj_init(void)
 #endif
 
 	return 0;
+}
+
+static int
+pci_dev_already_saved(char * path)
+{
+	uint32_t i;
+		
+	if(!ivshmem_config)
+		return 0;	///XXX: what could be a better error message?
+	
+	/* look for all the registered devices comparing with it */
+	for(i = 0; i < ivshmem_config->pci_devs_idx; i++)	
+		if(!strncmp(path, ivshmem_config->pci_devs[i].path, 
+			sizeof(ivshmem_config->pci_devs[i].path)))
+			return 1;		
+		
+	return 0;	
 }
 
 /* initialize ivshmem structures */
@@ -844,7 +896,6 @@ int rte_eal_ivshmem_init(void)
 
 	/* initialize everything to 0 */
 	memset(path, 0, sizeof(path));
-	ivshmem_config = NULL;
 
 	pagesz = getpagesize();
 
@@ -862,7 +913,7 @@ int rte_eal_ivshmem_init(void)
 		TAILQ_FOREACH(dev, &pci_device_list, next) {
 
 			if (is_ivshmem_device(dev)) {
-
+							
 				/* IVSHMEM memory is always on BAR2 */
 				res = &dev->mem_resource[2];
 
@@ -874,6 +925,13 @@ int rte_eal_ivshmem_init(void)
 				snprintf(path, sizeof(path), IVSHMEM_RESOURCE_PATH,
 						dev->addr.domain, dev->addr.bus, dev->addr.devid,
 						dev->addr.function);
+						
+				/* if it is already saved */
+				if(pci_dev_already_saved(path))
+				{
+					RTE_LOG(DEBUG, EAL, "Skipping existing IVSHMEM device\n");
+					continue;
+				}
 
 				/* try to find memseg */
 				fd = open(path, O_RDWR);
