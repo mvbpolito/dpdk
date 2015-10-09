@@ -40,6 +40,9 @@
 #include <sys/file.h>
 #include <string.h>
 #include <sys/queue.h>
+#include <libudev.h>
+#include <signal.h>
+#include <fcntl.h>
 
 #include <rte_log.h>
 #include <rte_pci.h>
@@ -57,8 +60,9 @@
 #include "eal_internal_cfg.h"
 #include "eal_private.h"
 
-#define PCI_VENDOR_ID_IVSHMEM 0x1Af4
+#define PCI_VENDOR_ID_IVSHMEM 0x1AF4
 #define PCI_DEVICE_ID_IVSHMEM 0x1110
+#define PCI_ID_IVSHMEM "1AF4:1110"
 
 #define IVSHMEM_MAGIC 0x0BADC0DE
 
@@ -100,6 +104,9 @@ struct ivshmem_shared_config {
 static struct ivshmem_shared_config * ivshmem_config = NULL;
 static int memseg_idx;
 static int pagesz;
+
+static struct udev * udev = NULL;
+static struct udev_monitor * udev_monitor = NULL;
 
 /* Tailq heads to add rings to */
 TAILQ_HEAD(rte_ring_list, rte_tailq_entry);
@@ -886,8 +893,8 @@ pci_dev_already_saved(char * path)
 	return 0;
 }
 
-/* initialize ivshmem structures */
-int rte_eal_ivshmem_init(void)
+static int
+ivshmem_read_devices(void)
 {
 	struct rte_pci_device * dev;
 	struct rte_pci_resource * res;
@@ -900,113 +907,243 @@ int rte_eal_ivshmem_init(void)
 	pagesz = getpagesize();
 
 	RTE_LOG(DEBUG, EAL, "Searching for IVSHMEM devices...\n");
+	
+	TAILQ_FOREACH(dev, &pci_device_list, next) {
 
+		if (is_ivshmem_device(dev)) {
+
+			/* IVSHMEM memory is always on BAR2 */
+			res = &dev->mem_resource[2];
+
+			/* if we don't have a BAR2 */
+			if (res->len == 0)
+				continue;
+
+			/* construct pci device path */
+			snprintf(path, sizeof(path), IVSHMEM_RESOURCE_PATH,
+					dev->addr.domain, dev->addr.bus, dev->addr.devid,
+					dev->addr.function);
+
+			/* if it is already saved */
+			if(pci_dev_already_saved(path))
+			{
+				RTE_LOG(DEBUG, EAL, "Skipping existing IVSHMEM device\n");
+				continue;
+			}
+
+			/* try to find memseg */
+			fd = open(path, O_RDWR);
+			if (fd < 0) {
+				RTE_LOG(ERR, EAL, "Could not open %s\n", path);
+				return -1;
+			}
+
+			/* check if it's a DPDK IVSHMEM device */
+			ret = has_ivshmem_metadata(fd, res->len);
+
+			/* is DPDK device */
+			if (ret == 1) {
+
+				/* config file creation is deferred until the first
+				 * DPDK device is found. then, it has to be created
+				 * only once. */
+				if (ivshmem_config == NULL &&
+						create_shared_config() < 0) {
+					RTE_LOG(ERR, EAL, "Could not create IVSHMEM config!\n");
+					close(fd);
+					return -1;
+				}
+
+				if (read_metadata(path, sizeof(path), fd, res->len) < 0) {
+					RTE_LOG(ERR, EAL, "Could not read metadata from"
+							" device %02x:%02x.%x!\n", dev->addr.bus,
+							dev->addr.devid, dev->addr.function);
+					close(fd);
+					return -1;
+				}
+
+				if (ivshmem_config->pci_devs_idx == RTE_LIBRTE_IVSHMEM_MAX_PCI_DEVS) {
+					RTE_LOG(WARNING, EAL,
+							"IVSHMEM PCI device limit exceeded. Increase "
+							"CONFIG_RTE_LIBRTE_IVSHMEM_MAX_PCI_DEVS  in "
+							"your config file.\n");
+					break;
+				}
+
+				RTE_LOG(INFO, EAL, "Found IVSHMEM device %02x:%02x.%x\n",
+						dev->addr.bus, dev->addr.devid, dev->addr.function);
+
+				ivshmem_config->pci_devs[ivshmem_config->pci_devs_idx].ioremap_addr = res->phys_addr;
+				snprintf(ivshmem_config->pci_devs[ivshmem_config->pci_devs_idx].path,
+						sizeof(ivshmem_config->pci_devs[ivshmem_config->pci_devs_idx].path),
+						"%s", path);
+
+				ivshmem_config->pci_devs_idx++;
+			}
+			/* failed to read */
+			else if (ret < 0) {
+				RTE_LOG(ERR, EAL, "Could not read IVSHMEM device: %s\n",
+						strerror(errno));
+				close(fd);
+				return -1;
+			}
+			/* not a DPDK device */
+			else
+				RTE_LOG(DEBUG, EAL, "Skipping non-DPDK IVSHMEM device\n");
+
+			/* close the BAR fd */
+			close(fd);
+		}
+	}
+
+	return 0;
+}
+
+void
+hotplug_handler(int d);
+
+/*static */void
+hotplug_handler(int d)
+{
+	const char *str;
+	struct udev_device * dev;
+
+	(void) d;
+	(void) dev;
+	(void) str;
+
+	if(udev_monitor == NULL)
+	{
+		RTE_LOG(ERR, EAL, "udev_monitor is NULL\n");
+		return;
+	}
+	
+	dev = udev_monitor_receive_device(udev_monitor);
+	if(dev == NULL)
+	{
+		RTE_LOG(ERR, EAL, "dev is NULL\n");
+		return;
+	}
+	str = udev_device_get_property_value(dev, "PCI_ID");
+	
+	if(str == NULL)
+		return;
+	
+	if(!strcmp(str, PCI_ID_IVSHMEM))
+	{
+		///XXX: block signal.
+		//RTE_LOG(DEBUG, EAL, "Ivshmem device: %s\n", udev_device_get_action(dev));
+		str = udev_device_get_action(dev);
+		if(!strcmp(str, "add"))
+		{
+			/* new ivshmem device  was found */
+			if (rte_eal_pci_scan() < 0)
+			{
+				RTE_LOG(ERR, EAL, "Cannot scan PCI\n");	
+				return; 
+			}
+			
+			if (ivshmem_read_devices() < 0)
+			{
+				RTE_LOG(ERR, EAL, "Cannot init IVSHMEM\n");	
+				return; 
+			}
+			
+			if (map_all_segments() < 0)
+			{
+				RTE_LOG(ERR, EAL, "Cannot init IVSHMEM\n");	
+				return; 
+			}
+			
+			if (rte_eal_ivshmem_obj_init() < 0)
+			{
+				RTE_LOG(ERR, EAL, "Cannot init IVSHMEM OBJ\n");	
+				return; 
+			}
+		}
+	}
+}
+
+/* initialize ivshmem structures */
+int rte_eal_ivshmem_init(void)
+{
+	int fd_mon;
+	
 	if (rte_eal_process_type() == RTE_PROC_SECONDARY) {
-
 		if (open_shared_config() < 0) {
 			RTE_LOG(ERR, EAL, "Could not open IVSHMEM config!\n");
 			return -1;
 		}
 	}
 	else {
+		/* 
+		 * install a udev_monitor to detect when new ivshmem device
+		 * is connected or disconnedted (not supported yet)
+		 */
+		udev = udev_new();
+		if(!udev)
+		{
+			RTE_LOG(ERR, EAL, "udev_new failed, ivshmem hotplug will"
+				"be disabled! \n");
+			goto read_devices;
+		}
 
-		TAILQ_FOREACH(dev, &pci_device_list, next) {
+		udev_monitor = udev_monitor_new_from_netlink(udev, "udev");
+		RTE_LOG(DEBUG, EAL, "udev_monitor: %p\n", udev_monitor);
+		if(!udev_monitor)
+		{
+			RTE_LOG(ERR, EAL, "udev_monitor can not be instantiated,"
+				"ivshmem hotplug will be disabled! \n");
+			goto read_devices;
+		}
 
-			if (is_ivshmem_device(dev)) {
+		fd_mon = udev_monitor_get_fd(udev_monitor);		///Check error!
+		
+		if(udev_monitor_filter_add_match_subsystem_devtype(udev_monitor, 
+			"pci", NULL) < 0)
+		{
+			RTE_LOG(ERR, EAL, "Error adding filter to udev_monitor.\n");
+			goto read_devices;
+		}
 
-				/* IVSHMEM memory is always on BAR2 */
-				res = &dev->mem_resource[2];
+		if (udev_monitor_enable_receiving(udev_monitor) < 0) 
+		{
+			RTE_LOG(ERR, EAL, "Error enabling udev_monitor..\n");
+			goto read_devices;
+		}
 
-				/* if we don't have a BAR2 */
-				if (res->len == 0)
-					continue;
-
-				/* construct pci device path */
-				snprintf(path, sizeof(path), IVSHMEM_RESOURCE_PATH,
-						dev->addr.domain, dev->addr.bus, dev->addr.devid,
-						dev->addr.function);
-
-				/* if it is already saved */
-				if(pci_dev_already_saved(path))
-				{
-					RTE_LOG(DEBUG, EAL, "Skipping existing IVSHMEM device\n");
-					continue;
-				}
-
-				/* try to find memseg */
-				fd = open(path, O_RDWR);
-				if (fd < 0) {
-					RTE_LOG(ERR, EAL, "Could not open %s\n", path);
-					return -1;
-				}
-
-				/* check if it's a DPDK IVSHMEM device */
-				ret = has_ivshmem_metadata(fd, res->len);
-
-				/* is DPDK device */
-				if (ret == 1) {
-
-					/* config file creation is deferred until the first
-					 * DPDK device is found. then, it has to be created
-					 * only once. */
-					if (ivshmem_config == NULL &&
-							create_shared_config() < 0) {
-						RTE_LOG(ERR, EAL, "Could not create IVSHMEM config!\n");
-						close(fd);
-						return -1;
-					}
-
-					if (read_metadata(path, sizeof(path), fd, res->len) < 0) {
-						RTE_LOG(ERR, EAL, "Could not read metadata from"
-								" device %02x:%02x.%x!\n", dev->addr.bus,
-								dev->addr.devid, dev->addr.function);
-						close(fd);
-						return -1;
-					}
-
-					if (ivshmem_config->pci_devs_idx == RTE_LIBRTE_IVSHMEM_MAX_PCI_DEVS) {
-						RTE_LOG(WARNING, EAL,
-								"IVSHMEM PCI device limit exceeded. Increase "
-								"CONFIG_RTE_LIBRTE_IVSHMEM_MAX_PCI_DEVS  in "
-								"your config file.\n");
-						break;
-					}
-
-					RTE_LOG(INFO, EAL, "Found IVSHMEM device %02x:%02x.%x\n",
-							dev->addr.bus, dev->addr.devid, dev->addr.function);
-
-					ivshmem_config->pci_devs[ivshmem_config->pci_devs_idx].ioremap_addr = res->phys_addr;
-					snprintf(ivshmem_config->pci_devs[ivshmem_config->pci_devs_idx].path,
-							sizeof(ivshmem_config->pci_devs[ivshmem_config->pci_devs_idx].path),
-							"%s", path);
-
-					ivshmem_config->pci_devs_idx++;
-				}
-				/* failed to read */
-				else if (ret < 0) {
-					RTE_LOG(ERR, EAL, "Could not read IVSHMEM device: %s\n",
-							strerror(errno));
-					close(fd);
-					return -1;
-				}
-				/* not a DPDK device */
-				else
-					RTE_LOG(DEBUG, EAL, "Skipping non-DPDK IVSHMEM device\n");
-
-				/* close the BAR fd */
-				close(fd);
-			}
+		/* 
+		 * setup a signal in a way that each time a device is connected
+		 * the handler is called in an automatic way 
+		 */
+		signal(SIGIO, &hotplug_handler);
+		if(fcntl(fd_mon, F_SETOWN, getpid()) != 0)
+		{
+			RTE_LOG(ERR, EAL, "Error fcntcl.\n");
+			goto read_devices;
+		}
+			
+		int oflags = fcntl(fd_mon, F_GETFL);
+		if(fcntl(fd_mon, F_SETFL, oflags | FASYNC) != 0)
+		{
+			RTE_LOG(ERR, EAL, "Error fcntcl.\n");
+			goto read_devices;
+		}
+		
+read_devices:
+		if(ivshmem_read_devices() < 0) {
+			//RTE_LOG(ERR, EAL, "Could not read IVSHMEM devices!\n");
+			return -1;
 		}
 	}
 
-	/* ivshmem_config is not NULL only if config was created and/or mapped */
-	if (ivshmem_config) {
+	if(ivshmem_config != NULL)
+	{
 		if (map_all_segments() < 0) {
 			RTE_LOG(ERR, EAL, "Mapping IVSHMEM segments failed!\n");
 			return -1;
 		}
-	}
-	else {
+	} else {
 		RTE_LOG(DEBUG, EAL, "No IVSHMEM configuration found! \n");
 	}
 
