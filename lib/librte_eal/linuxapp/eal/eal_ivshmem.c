@@ -790,6 +790,8 @@ rte_eal_ivshmem_obj_init(void)
 
 	mcfg = rte_eal_get_configuration()->mem_config;
 
+	rte_rwlock_write_lock(&mcfg->mlock);
+
 	/* create memzones */
 	for (i = 0; i < ivshmem_config->segment_idx && i <= RTE_MAX_MEMZONE; i++) {
 
@@ -830,6 +832,8 @@ rte_eal_ivshmem_obj_init(void)
 
 		mcfg->memzone_cnt++;
 	}
+
+	rte_rwlock_write_unlock(&mcfg->mlock);
 
 	/* find rings */
 	for (i = 0; i < mcfg->memzone_cnt; i++) {
@@ -1002,7 +1006,7 @@ ivshmem_read_devices(void)
 void
 hotplug_handler(int d);
 
-/*static */void
+static void
 hotplug_handler(int d)
 {
 	const char *str;
