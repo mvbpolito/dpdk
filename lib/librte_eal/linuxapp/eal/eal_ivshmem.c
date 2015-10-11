@@ -1003,9 +1003,6 @@ ivshmem_read_devices(void)
 	return 0;
 }
 
-void
-hotplug_handler(int d);
-
 static void
 hotplug_handler(int d)
 {
@@ -1013,8 +1010,6 @@ hotplug_handler(int d)
 	struct udev_device * dev;
 
 	(void) d;
-	(void) dev;
-	(void) str;
 
 	if(udev_monitor == NULL)
 	{
@@ -1066,6 +1061,34 @@ hotplug_handler(int d)
 			}
 		}
 	}
+}
+
+/*
+ * enables or disables the hotplugging of ivshmem devices
+ * if a device is hotppluged when hotppluging is disable then the 
+ * request will be processed when hotpugging will be enable
+ */
+static void
+set_hotplug_enable(int en)
+{
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGIO);
+	if(en)
+		pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+	else
+		pthread_sigmask(SIG_BLOCK, &set, NULL);
+}
+
+void
+rte_eal_ivshmem_enable_hotplug()
+{
+	return set_hotplug_enable(1);
+}
+
+void rte_eal_ivshmem_disable_hotplug()
+{
+	return set_hotplug_enable(0);
 }
 
 /* initialize ivshmem structures */
