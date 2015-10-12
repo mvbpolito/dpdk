@@ -51,7 +51,7 @@ extern "C" {
 
 #define IVSHMEM_MAGIC 0x0BADC0DE
 #define IVSHMEM_NAME_LEN 32
-#define IVSHMEM_REMAP_PREFIX "REMAP%s"
+#define IVSHMEM_REMAP_PREFIX "REMAP"
 
 /**
  * Structure that holds IVSHMEM shared metadata entry.

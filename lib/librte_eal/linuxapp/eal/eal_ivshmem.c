@@ -326,6 +326,19 @@ entry_dump(struct rte_ivshmem_metadata_entry *e)
 #endif
 
 
+static void
+unmap_memseg(struct ivshmem_segment * seg)
+{
+	uint64_t align, len, addr;
+	
+	/* work out alignments */
+	align = seg->entry.mz.addr_64 - 
+		RTE_ALIGN_FLOOR(seg->entry.mz.addr_64, 0x1000);
+	len = RTE_ALIGN_CEIL(seg->entry.mz.len + align, 0x1000);
+	
+	addr = seg->entry.mz.addr_64 - align;
+	munmap((void *) addr, len);	///XXX: Be carefull with the casting
+}
 
 /*
  * Actual useful code
@@ -339,6 +352,7 @@ read_metadata(char * path, int path_len, int fd, uint64_t flen)
 	struct rte_ivshmem_metadata_entry * entry;
 	int idx, i;
 	void * ptr;
+	int unmap = 0;	/* 1 is the metadata file request unmapping */
 
 	ptr = map_metadata(fd, flen);
 
@@ -350,6 +364,13 @@ read_metadata(char * path, int path_len, int fd, uint64_t flen)
 	unmap_metadata(ptr);
 
 	RTE_LOG(DEBUG, EAL, "Parsing metadata for \"%s\"\n", metadata.name);
+
+	if (strncmp(metadata.name, IVSHMEM_REMAP_PREFIX,
+		sizeof(IVSHMEM_REMAP_PREFIX) - 1) == 0)
+	{
+		RTE_LOG(DEBUG, EAL, "Metadata file request unmap\n");
+		unmap = 1;
+	}
 
 	idx = ivshmem_config->segment_idx;
 
@@ -373,6 +394,11 @@ read_metadata(char * path, int path_len, int fd, uint64_t flen)
 
 		/* copy path */
 		snprintf(ivshmem_config->segment[idx].path, path_len, "%s", path);
+
+		if(unmap)
+		{
+			unmap_memseg(&ivshmem_config->segment[idx]);
+		}
 
 		idx++;
 	}
@@ -583,7 +609,8 @@ open_shared_config(void)
 }
 
 static int
-map_one_segment(struct ivshmem_segment * seg, struct rte_memseg * ms, int fd_zero) 
+map_one_segment(struct ivshmem_segment * seg, struct rte_memseg * ms, 
+		int fd_zero) 
 {
 	void * base_addr;
 	int fd;

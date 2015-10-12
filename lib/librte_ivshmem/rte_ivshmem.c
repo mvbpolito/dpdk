@@ -915,7 +915,7 @@ int rte_ivshmem_remap_metadata_create(struct rte_ring * old,
 		if(buffer == NULL)
 			return -1;
 
-		sprintf(name, IVSHMEM_REMAP_PREFIX, old->name);
+		sprintf(name, "%s%s", IVSHMEM_REMAP_PREFIX, old->name);
 
 		if(rte_ivshmem_metadata_create(name) < 0)
 			return -1;
