@@ -51,6 +51,7 @@ extern "C" {
 
 #define IVSHMEM_MAGIC 0x0BADC0DE
 #define IVSHMEM_NAME_LEN 32
+#define IVSHMEM_REMAP_PREFIX "REMAP%s"
 
 /**
  * Structure that holds IVSHMEM shared metadata entry.
@@ -157,6 +158,9 @@ int rte_ivshmem_metadata_cmdline_generate(char *buffer, unsigned size,
  */
 void rte_ivshmem_metadata_dump(FILE *f, const char *name);
 
+///TODO: add documentation
+int rte_ivshmem_remap_metadata_create(struct rte_ring * old, 
+		struct rte_ring * new, char * buffer, unsigned size);
 
 #ifdef __cplusplus
 }

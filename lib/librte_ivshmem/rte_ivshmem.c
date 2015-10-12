@@ -899,3 +899,47 @@ rte_ivshmem_metadata_dump(FILE *f, const char *name)
 
 	rte_spinlock_unlock(&config->sl);
 }
+
+///TODO: sanity checks everywhere
+int rte_ivshmem_remap_metadata_create(struct rte_ring * old, 
+		struct rte_ring * new, char * buffer, unsigned size){
+
+		char name[IVSHMEM_NAME_LEN];
+		struct ivshmem_config * config;
+		struct rte_memzone * mz_old;
+		struct rte_memzone * mz_new;
+
+		if(old == NULL || new == NULL)
+			return -1;
+
+		if(buffer == NULL)
+			return -1;
+
+		sprintf(name, IVSHMEM_REMAP_PREFIX, old->name);
+
+		if(rte_ivshmem_metadata_create(name) < 0)
+			return -1;
+
+		config = get_config_by_name(name);
+		if(config == NULL)
+			return -1;
+
+		mz_old = get_memzone_by_addr(old);
+		if(mz_old == NULL)
+			return -1;
+
+		mz_new = get_memzone_by_addr(new);
+		if(mz_new == NULL)
+			return -1;
+
+		if(add_memzone_to_metadata(mz_new, config) < 0)
+			return -1;
+		
+		//A small trick here!
+		config->metadata->entry[0].mz.addr_64 = mz_old->addr_64;
+		
+		if(rte_ivshmem_metadata_cmdline_generate(buffer, size, name) < 0)
+			return -1;
+		
+		return 0;
+}

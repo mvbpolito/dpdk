@@ -1080,13 +1080,16 @@ set_hotplug_enable(int en)
 		pthread_sigmask(SIG_BLOCK, &set, NULL);
 }
 
-void
-rte_eal_ivshmem_enable_hotplug()
+void rte_eal_ivshmem_enable_hotplug(void);
+
+void rte_eal_ivshmem_enable_hotplug(void)
 {
 	return set_hotplug_enable(1);
 }
 
-void rte_eal_ivshmem_disable_hotplug()
+void rte_eal_ivshmem_disable_hotplug(void);
+
+void rte_eal_ivshmem_disable_hotplug(void)
 {
 	return set_hotplug_enable(0);
 }
