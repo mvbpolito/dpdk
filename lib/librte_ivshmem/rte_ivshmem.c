@@ -935,7 +935,7 @@ int rte_ivshmem_remap_metadata_create(struct rte_ring * old,
 		if(add_memzone_to_metadata(mz_new, config) < 0)
 			return -1;
 		
-		//A small trick here!
+		/* A small trick here! */
 		config->metadata->entry[0].mz.addr_64 = mz_old->addr_64;
 		
 		if(rte_ivshmem_metadata_cmdline_generate(buffer, size, name) < 0)

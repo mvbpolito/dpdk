@@ -582,6 +582,67 @@ open_shared_config(void)
 	return 0;
 }
 
+static int
+map_one_segment(struct ivshmem_segment * seg, struct rte_memseg * ms, int fd_zero) 
+{
+	void * base_addr;
+	int fd;
+	
+	ms->addr_64 = seg->entry.mz.addr_64;
+	ms->hugepage_sz = seg->entry.mz.hugepage_sz;
+	ms->len = seg->entry.mz.len;
+	ms->nchannel = rte_memory_get_nchannel();
+	ms->nrank = rte_memory_get_nrank();
+	ms->phys_addr = seg->entry.mz.phys_addr;
+	ms->ioremap_addr = seg->entry.mz.ioremap_addr;
+	ms->socket_id = seg->entry.mz.socket_id;
+
+	base_addr = mmap(ms->addr, ms->len,
+			PROT_READ | PROT_WRITE, MAP_PRIVATE, fd_zero, 0);
+
+	if (base_addr == MAP_FAILED || base_addr != ms->addr) {
+		RTE_LOG(ERR, EAL, "Cannot map /dev/zero!\n");
+		return -1;
+	}
+
+	fd = open(seg->path, O_RDWR);
+
+	if (fd < 0) {
+		RTE_LOG(ERR, EAL, "Cannot open %s: %s\n", seg->path,
+				strerror(errno));
+		return -1;
+	}
+
+	munmap(ms->addr, ms->len);
+
+	base_addr = mmap(ms->addr, ms->len,
+			PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+			seg->entry.offset);
+
+
+	if (base_addr == MAP_FAILED || base_addr != ms->addr) {
+		RTE_LOG(ERR, EAL, "Cannot map segment into memory: "
+				"expected %p got %p (%s)\n", ms->addr, base_addr,
+				strerror(errno));
+		return -1;
+	}
+
+	close(fd);
+	
+	RTE_LOG(DEBUG, EAL, "Memory segment mapped: %p (len %" PRIx64 ") at "
+			"offset 0x%" PRIx64 "\n",
+			ms->addr, ms->len, seg->entry.offset);
+
+	/* put the pointers back into their real positions using original
+	 * alignment */
+	ms->addr_64 += seg->align;
+	ms->phys_addr += seg->align;
+	ms->ioremap_addr += seg->align;
+	ms->len -= seg->align;
+	
+	return 0;
+}
+
 /*
  * This function does the following:
  *
@@ -597,11 +658,10 @@ map_all_segments(void)
 	struct ivshmem_pci_device * pci_dev;
 	struct rte_mem_config * mcfg;
 	struct ivshmem_segment * seg;
-	int fd, fd_zero;
+	int fd_zero;
 	unsigned i, j, k;
 	struct rte_memzone mz;
 	struct rte_memseg ms;
-	void * base_addr;
 	uint64_t align, len;
 	phys_addr_t ioremap_addr;
 
@@ -700,61 +760,11 @@ map_all_segments(void)
 
 		seg = &ms_tbl[i];
 
-		ms.addr_64 = seg->entry.mz.addr_64;
-		ms.hugepage_sz = seg->entry.mz.hugepage_sz;
-		ms.len = seg->entry.mz.len;
-		ms.nchannel = rte_memory_get_nchannel();
-		ms.nrank = rte_memory_get_nrank();
-		ms.phys_addr = seg->entry.mz.phys_addr;
-		ms.ioremap_addr = seg->entry.mz.ioremap_addr;
-		ms.socket_id = seg->entry.mz.socket_id;
-
-		base_addr = mmap(ms.addr, ms.len,
-				PROT_READ | PROT_WRITE, MAP_PRIVATE, fd_zero, 0);
-
-		if (base_addr == MAP_FAILED || base_addr != ms.addr) {
-			RTE_LOG(ERR, EAL, "Cannot map /dev/zero!\n");
-			return -1;
-		}
-
-		fd = open(seg->path, O_RDWR);
-
-		if (fd < 0) {
-			RTE_LOG(ERR, EAL, "Cannot open %s: %s\n", seg->path,
-					strerror(errno));
-			return -1;
-		}
-
-		munmap(ms.addr, ms.len);
-
-		base_addr = mmap(ms.addr, ms.len,
-				PROT_READ | PROT_WRITE, MAP_SHARED, fd,
-				seg->entry.offset);
-
-
-		if (base_addr == MAP_FAILED || base_addr != ms.addr) {
-			RTE_LOG(ERR, EAL, "Cannot map segment into memory: "
-					"expected %p got %p (%s)\n", ms.addr, base_addr,
-					strerror(errno));
-			return -1;
-		}
-
-		RTE_LOG(DEBUG, EAL, "Memory segment mapped: %p (len %" PRIx64 ") at "
-				"offset 0x%" PRIx64 "\n",
-				ms.addr, ms.len, seg->entry.offset);
-
-		/* put the pointers back into their real positions using original
-		 * alignment */
-		ms.addr_64 += seg->align;
-		ms.phys_addr += seg->align;
-		ms.ioremap_addr += seg->align;
-		ms.len -= seg->align;
+		map_one_segment(seg, &ms, fd_zero);
 
 		/* copy memseg starting from the last free one */
 		memcpy(&mcfg->memseg[j + i], &ms,
 				sizeof(struct rte_memseg));
-
-		close(fd);
 
 		RTE_LOG(DEBUG, EAL, "IVSHMEM segment found, size: 0x%lx\n",
 				ms.len);
