@@ -330,6 +330,10 @@ static void
 unmap_memseg(struct ivshmem_segment * seg)
 {
 	uint64_t align, len, addr;
+	int retval;
+	RTE_LOG(DEBUG, EAL, "unmap_memseg: \n");
+	RTE_LOG(DEBUG, EAL, "addr: 0x%" PRIx64 "len: 0x%" PRIx64 "\n", 
+		seg->entry.mz.addr_64, seg->entry.mz.len);
 	
 	/* work out alignments */
 	align = seg->entry.mz.addr_64 - 
@@ -337,7 +341,13 @@ unmap_memseg(struct ivshmem_segment * seg)
 	len = RTE_ALIGN_CEIL(seg->entry.mz.len + align, 0x1000);
 	
 	addr = seg->entry.mz.addr_64 - align;
-	munmap((void *) addr, len);	///XXX: Be carefull with the casting
+	
+	RTE_LOG(DEBUG, EAL, "addr: 0x%" PRIx64 "len: 0x%" PRIx64 "\n", 
+		addr, len);
+	
+	retval = munmap((void *) addr, len);	///XXX: Be carefull with the casting
+	if(retval != 0)
+		RTE_LOG(DEBUG, EAL, "Error munmap: (%s)\n", strerror(errno));
 }
 
 /*
