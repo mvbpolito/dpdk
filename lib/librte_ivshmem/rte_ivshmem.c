@@ -348,9 +348,9 @@ build_config(struct rte_ivshmem_metadata * metadata)
 
 		/*
 		 * browse all entries starting at 'i', and find the
-		 * entry with the smallest addr
+		 * entry with the (smallest addr) biggest length
 		 */
-		for (j=i; j< RTE_DIM(pages); j++) {
+		for (j = i; j < RTE_DIM(pages); j++) {
 			if (pages[j].addr == NULL)
 					break;
 			if (biggest_len == 0 ||

@@ -60,6 +60,8 @@
 #include "eal_internal_cfg.h"
 #include "eal_private.h"
 
+#define RTE_LIBRTE_IVSHMEM_DEBUG
+
 #define PCI_VENDOR_ID_IVSHMEM 0x1AF4
 #define PCI_DEVICE_ID_IVSHMEM 0x1110
 #define PCI_ID_IVSHMEM "1AF4:1110"
@@ -652,6 +654,12 @@ map_one_segment(struct ivshmem_segment * seg, struct rte_memseg * ms,
 
 	munmap(ms->addr, ms->len);
 
+	RTE_LOG(DEBUG, EAL, "Mapping Segment: \n");
+	RTE_LOG(DEBUG, EAL, "\tAddr: %p\n", ms->addr);
+	RTE_LOG(DEBUG, EAL, "\tLen: 0x%" PRIx64 "\n", ms->len);
+	RTE_LOG(DEBUG, EAL, "\tOff: 0x%" PRIx64 "\n", seg->entry.offset);
+	RTE_LOG(DEBUG, EAL, "\tAlign: 0x%" PRIx64 "\n", seg->align);
+
 	base_addr = mmap(ms->addr, ms->len,
 			PROT_READ | PROT_WRITE, MAP_SHARED, fd,
 			seg->entry.offset);
@@ -837,14 +845,12 @@ rte_eal_ivshmem_obj_init(void)
 
 	mcfg = rte_eal_get_configuration()->mem_config;
 
-	rte_rwlock_write_lock(&mcfg->mlock);
-
 	/* create memzones */
 	for (i = 0; i < ivshmem_config->segment_idx && i <= RTE_MAX_MEMZONE; i++) {
 
 		seg = &ivshmem_config->segment[i];
 
-		/* avoid duplicanting memzones */
+		/* avoid duplicating memzones */
 		if(rte_memzone_lookup(seg->entry.mz.name) != NULL)
 			continue;
 
@@ -879,8 +885,6 @@ rte_eal_ivshmem_obj_init(void)
 
 		mcfg->memzone_cnt++;
 	}
-
-	rte_rwlock_write_unlock(&mcfg->mlock);
 
 	/* find rings */
 	for (i = 0; i < mcfg->memzone_cnt; i++) {
