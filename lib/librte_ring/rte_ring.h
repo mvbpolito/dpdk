@@ -100,6 +100,7 @@ extern "C" {
 #include <rte_lcore.h>
 #include <rte_atomic.h>
 #include <rte_branch_prediction.h>
+#include <rte_spinlock.h>
 
 #define RTE_TAILQ_RING_NAME "RTE_RING"
 
@@ -155,6 +156,9 @@ struct rte_ring_stats {
 struct rte_ring {
 	char name[RTE_RING_NAMESIZE];    /**< Name of the ring. */
 	int flags;                       /**< Flags supplied at creation. */
+	int needs_remapping;      		/* is there a pending remap operation on this ring? */
+	rte_spinlock_t remapped;		/* The guest acks the host that the ring was remapped */
+	rte_spinlock_t usable;			/* The host acks the guest telling that the ring is ready for use */
 
 	/** Ring producer status. */
 	struct prod {
@@ -350,6 +354,23 @@ int rte_ring_set_water_mark(struct rte_ring *r, unsigned count);
  */
 void rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats);
 
+static inline void check_ring_remapping(struct rte_ring * r)
+{
+	if(r->needs_remapping)
+	{
+		/* XXX: what to do if this function fails?
+		 * 	- panic?
+		 *  - return?
+		 *  - nothing?
+		 */
+		rte_eal_ivshmem_remap_segments();
+
+		/* Wait until the host confirms that the ring is usable */
+		rte_spinlock_lock(&r->usable);
+		/* The host confirmed, unlock and continue */
+		rte_spinlock_unlock(&r->usable);
+	}
+}
 
 /**
  * Dump the status of the ring to the console.
@@ -449,6 +470,8 @@ __rte_ring_mp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	unsigned i, rep = 0;
 	uint32_t mask = r->prod.mask;
 	int ret;
+
+	check_ring_remapping(r);
 
 	/* move prod.head atomically */
 	do {
@@ -557,6 +580,8 @@ __rte_ring_sp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	uint32_t mask = r->prod.mask;
 	int ret;
 
+	check_ring_remapping(r);
+
 	prod_head = r->prod.head;
 	cons_tail = r->cons.tail;
 	/* The subtraction is done between two unsigned 32bits value
@@ -645,6 +670,8 @@ __rte_ring_mc_do_dequeue(struct rte_ring *r, void **obj_table,
 	int success;
 	unsigned i, rep = 0;
 	uint32_t mask = r->prod.mask;
+
+	check_ring_remapping(r);
 
 	/* move cons.head atomically */
 	do {
@@ -737,6 +764,8 @@ __rte_ring_sc_do_dequeue(struct rte_ring *r, void **obj_table,
 	uint32_t cons_next, entries;
 	unsigned i;
 	uint32_t mask = r->prod.mask;
+
+	check_ring_remapping(r);
 
 	cons_head = r->cons.head;
 	prod_tail = r->prod.tail;
@@ -1063,6 +1092,8 @@ rte_ring_dequeue(struct rte_ring *r, void **obj_p)
 static inline int
 rte_ring_full(const struct rte_ring *r)
 {
+	//check_ring_remapping(r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return (((cons_tail - prod_tail - 1) & r->prod.mask) == 0);
@@ -1080,6 +1111,8 @@ rte_ring_full(const struct rte_ring *r)
 static inline int
 rte_ring_empty(const struct rte_ring *r)
 {
+	//check_ring_remapping(r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return !!(cons_tail == prod_tail);
@@ -1096,6 +1129,8 @@ rte_ring_empty(const struct rte_ring *r)
 static inline unsigned
 rte_ring_count(const struct rte_ring *r)
 {
+	//check_ring_remapping(r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return ((prod_tail - cons_tail) & r->prod.mask);
@@ -1112,6 +1147,8 @@ rte_ring_count(const struct rte_ring *r)
 static inline unsigned
 rte_ring_free_count(const struct rte_ring *r)
 {
+	//check_ring_remapping((struct rte_ring *) r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return ((cons_tail - prod_tail - 1) & r->prod.mask);

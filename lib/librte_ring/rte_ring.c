@@ -205,6 +205,9 @@ rte_ring_create(const char *name, unsigned count, int socket_id,
 	}
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
 
+	rte_spinlock_init(&r->remapped);
+	rte_spinlock_init(&r->usable);
+
 	return r;
 }
 
@@ -235,6 +238,8 @@ rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats)
 {
 	if(r == NULL || stats == NULL)
 		return;
+
+	check_ring_remapping(r);
 
 	unsigned int i;
 
