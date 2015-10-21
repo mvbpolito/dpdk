@@ -226,6 +226,27 @@ rte_ring_set_water_mark(struct rte_ring *r, unsigned count)
 	return 0;
 }
 
+/**
+ * XXX
+ * Is this thread safe?, better, does it require to be thread safe?
+ */
+void
+rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats)
+{
+	if(r == NULL || stats == NULL)
+		return;
+
+	unsigned int i;
+
+	stats->tx = 0;
+	stats->err = 0;
+	for(i = 0; i < RTE_MAX_LCORE; i++)
+	{
+		stats->tx += r->ring_stats[i].tx;
+		stats->err += r->ring_stats[i].err;
+	}
+}
+
 /* dump the status of the ring on the console */
 void
 rte_ring_dump(FILE *f, const struct rte_ring *r)

@@ -126,6 +126,14 @@ struct rte_ring_debug_stats {
 } __rte_cache_aligned;
 #endif
 
+/*
+ * ring statistics used in direct vm2vm implementation
+ */
+struct rte_ring_stats {
+	uint64_t tx;		/* number of succesfull enqueue packets */
+	uint64_t err;		/* number of errors (failed to enqueue) */
+} __rte_cache_aligned;
+
 #define RTE_RING_NAMESIZE 32 /**< The maximum length of a ring name. */
 #define RTE_RING_MZ_PREFIX "RG_"
 
@@ -171,6 +179,8 @@ struct rte_ring {
 	} cons;
 #endif
 
+	struct rte_ring_stats ring_stats[RTE_MAX_LCORE];
+
 #ifdef RTE_LIBRTE_RING_DEBUG
 	struct rte_ring_debug_stats stats[RTE_MAX_LCORE];
 #endif
@@ -205,6 +215,20 @@ struct rte_ring {
 #else
 #define __RING_STAT_ADD(r, name, n) do {} while(0)
 #endif
+
+#define __RING_TX_STATS_ADD(r, n) do {                      \
+		unsigned __lcore_id = rte_lcore_id();               \
+		if(__lcore_id < RTE_MAX_LCORE) {                    \
+			 r->ring_stats[__lcore_id].tx += n;             \
+		}                                                   \
+	} while(0)
+
+#define __RING_ERR_STATS_ADD(r, n) do {                     \
+		unsigned __lcore_id = rte_lcore_id();               \
+		if(__lcore_id < RTE_MAX_LCORE) {                    \
+			 r->ring_stats[__lcore_id].err += n;            \
+		}                                                   \
+	} while(0)
 
 /**
  * Calculate the memory size needed for a ring
@@ -320,6 +344,12 @@ struct rte_ring *rte_ring_create(const char *name, unsigned count,
  *   - -EINVAL: Invalid water mark value.
  */
 int rte_ring_set_water_mark(struct rte_ring *r, unsigned count);
+
+/*
+ * return a  sum of the struct for each l_core.
+ */
+void rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats);
+
 
 /**
  * Dump the status of the ring to the console.
@@ -437,12 +467,14 @@ __rte_ring_mp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 		if (unlikely(n > free_entries)) {
 			if (behavior == RTE_RING_QUEUE_FIXED) {
 				__RING_STAT_ADD(r, enq_fail, n);
+				__RING_ERR_STATS_ADD(r, n);
 				return -ENOBUFS;
 			}
 			else {
 				/* No free entry available */
 				if (unlikely(free_entries == 0)) {
 					__RING_STAT_ADD(r, enq_fail, n);
+					__RING_ERR_STATS_ADD(r, n);
 					return 0;
 				}
 
@@ -464,11 +496,14 @@ __rte_ring_mp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 		ret = (behavior == RTE_RING_QUEUE_FIXED) ? -EDQUOT :
 				(int)(n | RTE_RING_QUOT_EXCEED);
 		__RING_STAT_ADD(r, enq_quota, n);
+
 	}
 	else {
 		ret = (behavior == RTE_RING_QUEUE_FIXED) ? 0 : n;
 		__RING_STAT_ADD(r, enq_success, n);
 	}
+
+	__RING_TX_STATS_ADD(r, n);
 
 	/*
 	 * If there are other enqueues in progress that preceded us,
@@ -534,12 +569,14 @@ __rte_ring_sp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	if (unlikely(n > free_entries)) {
 		if (behavior == RTE_RING_QUEUE_FIXED) {
 			__RING_STAT_ADD(r, enq_fail, n);
+			__RING_ERR_STATS_ADD(r, n);
 			return -ENOBUFS;
 		}
 		else {
 			/* No free entry available */
 			if (unlikely(free_entries == 0)) {
 				__RING_STAT_ADD(r, enq_fail, n);
+				__RING_ERR_STATS_ADD(r, n);
 				return 0;
 			}
 
@@ -564,6 +601,8 @@ __rte_ring_sp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 		ret = (behavior == RTE_RING_QUEUE_FIXED) ? 0 : n;
 		__RING_STAT_ADD(r, enq_success, n);
 	}
+
+	__RING_TX_STATS_ADD(r, n);
 
 	r->prod.tail = prod_next;
 	return ret;
