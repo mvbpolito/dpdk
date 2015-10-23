@@ -148,6 +148,7 @@ endif # ! $(CONFIG_RTE_BUILD_SHARED_LIB)
 endif # ! CONFIG_RTE_BUILD_COMBINE_LIBS
 
 _LDLIBS-y += $(EXECENV_LDLIBS)
+_LDLIBS-y += -ludev
 _LDLIBS-y += --end-group
 _LDLIBS-y += --no-whole-archive
 
