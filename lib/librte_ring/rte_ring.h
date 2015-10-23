@@ -359,6 +359,8 @@ static inline void check_ring_remapping(struct rte_ring * r)
 {
 	if(r->needs_remapping)
 	{
+		RTE_LOG(INFO, RING, "Ring needs remapping\n");
+		
 		/* XXX: what to do if this function fails?
 		 * 	- panic?
 		 *  - return?

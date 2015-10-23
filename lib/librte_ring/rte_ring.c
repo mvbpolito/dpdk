@@ -149,6 +149,8 @@ rte_ring_init(struct rte_ring *r, const char *name, unsigned count,
 	r->prod.mask = r->cons.mask = count-1;
 	r->prod.head = r->cons.head = 0;
 	r->prod.tail = r->cons.tail = 0;
+	
+	r->needs_remapping = 0;
 
 	rte_spinlock_init(&r->remapped);
 	rte_spinlock_init(&r->usable);
