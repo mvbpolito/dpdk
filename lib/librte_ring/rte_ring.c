@@ -239,7 +239,9 @@ rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats)
 	if(r == NULL || stats == NULL)
 		return;
 
+#ifdef RTE_LIBRTE_IVSHMEM
 	check_ring_remapping(r);
+#endif
 
 	unsigned int i;
 

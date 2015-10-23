@@ -354,6 +354,7 @@ int rte_ring_set_water_mark(struct rte_ring *r, unsigned count);
  */
 void rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats);
 
+#ifdef RTE_LIBRTE_IVSHMEM
 static inline void check_ring_remapping(struct rte_ring * r)
 {
 	if(r->needs_remapping)
@@ -371,7 +372,7 @@ static inline void check_ring_remapping(struct rte_ring * r)
 		rte_spinlock_unlock(&r->usable);
 	}
 }
-
+#endif
 /**
  * Dump the status of the ring to the console.
  *
@@ -471,7 +472,9 @@ __rte_ring_mp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	uint32_t mask = r->prod.mask;
 	int ret;
 
+#ifdef RTE_LIBRTE_IVSHMEM
 	check_ring_remapping(r);
+#endif
 
 	/* move prod.head atomically */
 	do {
@@ -580,7 +583,9 @@ __rte_ring_sp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	uint32_t mask = r->prod.mask;
 	int ret;
 
+#ifdef RTE_LIBRTE_IVSHMEM
 	check_ring_remapping(r);
+#endif
 
 	prod_head = r->prod.head;
 	cons_tail = r->cons.tail;
@@ -671,7 +676,9 @@ __rte_ring_mc_do_dequeue(struct rte_ring *r, void **obj_table,
 	unsigned i, rep = 0;
 	uint32_t mask = r->prod.mask;
 
+#ifdef RTE_LIBRTE_IVSHMEM
 	check_ring_remapping(r);
+#endif
 
 	/* move cons.head atomically */
 	do {
@@ -765,7 +772,9 @@ __rte_ring_sc_do_dequeue(struct rte_ring *r, void **obj_table,
 	unsigned i;
 	uint32_t mask = r->prod.mask;
 
+#ifdef RTE_LIBRTE_IVSHMEM
 	check_ring_remapping(r);
+#endif
 
 	cons_head = r->cons.head;
 	prod_tail = r->prod.tail;
