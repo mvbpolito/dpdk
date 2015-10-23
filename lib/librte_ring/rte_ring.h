@@ -101,6 +101,7 @@ extern "C" {
 #include <rte_atomic.h>
 #include <rte_branch_prediction.h>
 #include <rte_spinlock.h>
+#include <rte_log.h>
 
 #define RTE_TAILQ_RING_NAME "RTE_RING"
 
