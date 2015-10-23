@@ -150,6 +150,9 @@ rte_ring_init(struct rte_ring *r, const char *name, unsigned count,
 	r->prod.head = r->cons.head = 0;
 	r->prod.tail = r->cons.tail = 0;
 
+	rte_spinlock_init(&r->remapped);
+	rte_spinlock_init(&r->usable);
+
 	return 0;
 }
 
@@ -204,9 +207,6 @@ rte_ring_create(const char *name, unsigned count, int socket_id,
 		rte_free(te);
 	}
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
-
-	rte_spinlock_init(&r->remapped);
-	rte_spinlock_init(&r->usable);
 
 	return r;
 }
