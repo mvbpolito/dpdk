@@ -231,6 +231,9 @@ static inline int rte_gettid(void)
 	return RTE_PER_LCORE(_thread_id);
 }
 
+/* XXX: add documentation */
+int rte_eal_ivshmem_remap_segments(void);
+
 #ifdef __cplusplus
 }
 #endif

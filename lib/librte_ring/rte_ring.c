@@ -72,7 +72,6 @@
 #include <sys/queue.h>
 
 #include <rte_common.h>
-#include <rte_log.h>
 #include <rte_memory.h>
 #include <rte_memzone.h>
 #include <rte_malloc.h>
@@ -149,6 +148,11 @@ rte_ring_init(struct rte_ring *r, const char *name, unsigned count,
 	r->prod.mask = r->cons.mask = count-1;
 	r->prod.head = r->cons.head = 0;
 	r->prod.tail = r->cons.tail = 0;
+	
+	r->needs_remapping = 0;
+
+	rte_spinlock_init(&r->remapped);
+	rte_spinlock_init(&r->usable);
 
 	return 0;
 }
@@ -188,7 +192,7 @@ rte_ring_create(const char *name, unsigned count, int socket_id,
 	/* reserve a memory zone for this ring. If we can't get rte_config or
 	 * we are secondary process, the memzone_reserve function will set
 	 * rte_errno for us appropriately - hence no check in this this function */
-	mz = rte_memzone_reserve(mz_name, ring_size, socket_id, mz_flags);
+	mz = rte_memzone_reserve_aligned(mz_name, ring_size, socket_id, mz_flags, 0x1000);
 	if (mz != NULL) {
 		r = mz->addr;
 		/* no need to check return value here, we already checked the
@@ -224,6 +228,31 @@ rte_ring_set_water_mark(struct rte_ring *r, unsigned count)
 
 	r->prod.watermark = count;
 	return 0;
+}
+
+/**
+ * XXX
+ * Is this thread safe?, better, does it require to be thread safe?
+ */
+void
+rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats)
+{
+	if(r == NULL || stats == NULL)
+		return;
+
+#ifdef RTE_LIBRTE_IVSHMEM
+	check_ring_remapping(r);
+#endif
+
+	unsigned int i;
+
+	stats->tx = 0;
+	stats->err = 0;
+	for(i = 0; i < RTE_MAX_LCORE; i++)
+	{
+		stats->tx += r->ring_stats[i].tx;
+		stats->err += r->ring_stats[i].err;
+	}
 }
 
 /* dump the status of the ring on the console */

@@ -100,6 +100,8 @@ extern "C" {
 #include <rte_lcore.h>
 #include <rte_atomic.h>
 #include <rte_branch_prediction.h>
+#include <rte_spinlock.h>
+#include <rte_log.h>
 
 #define RTE_TAILQ_RING_NAME "RTE_RING"
 
@@ -126,6 +128,14 @@ struct rte_ring_debug_stats {
 } __rte_cache_aligned;
 #endif
 
+/*
+ * ring statistics used in direct vm2vm implementation
+ */
+struct rte_ring_stats {
+	uint64_t tx;		/* number of succesfull enqueue packets */
+	uint64_t err;		/* number of errors (failed to enqueue) */
+} __rte_cache_aligned;
+
 #define RTE_RING_NAMESIZE 32 /**< The maximum length of a ring name. */
 #define RTE_RING_MZ_PREFIX "RG_"
 
@@ -147,6 +157,9 @@ struct rte_ring_debug_stats {
 struct rte_ring {
 	char name[RTE_RING_NAMESIZE];    /**< Name of the ring. */
 	int flags;                       /**< Flags supplied at creation. */
+	int needs_remapping;      		/* is there a pending remap operation on this ring? */
+	rte_spinlock_t remapped;		/* The guest acks the host that the ring was remapped */
+	rte_spinlock_t usable;			/* The host acks the guest telling that the ring is ready for use */
 
 	/** Ring producer status. */
 	struct prod {
@@ -170,6 +183,8 @@ struct rte_ring {
 #else
 	} cons;
 #endif
+
+	struct rte_ring_stats ring_stats[RTE_MAX_LCORE];
 
 #ifdef RTE_LIBRTE_RING_DEBUG
 	struct rte_ring_debug_stats stats[RTE_MAX_LCORE];
@@ -205,6 +220,20 @@ struct rte_ring {
 #else
 #define __RING_STAT_ADD(r, name, n) do {} while(0)
 #endif
+
+#define __RING_TX_STATS_ADD(r, n) do {                      \
+		unsigned __lcore_id = rte_lcore_id();               \
+		if(__lcore_id < RTE_MAX_LCORE) {                    \
+			 r->ring_stats[__lcore_id].tx += n;             \
+		}                                                   \
+	} while(0)
+
+#define __RING_ERR_STATS_ADD(r, n) do {                     \
+		unsigned __lcore_id = rte_lcore_id();               \
+		if(__lcore_id < RTE_MAX_LCORE) {                    \
+			 r->ring_stats[__lcore_id].err += n;            \
+		}                                                   \
+	} while(0)
 
 /**
  * Calculate the memory size needed for a ring
@@ -321,6 +350,32 @@ struct rte_ring *rte_ring_create(const char *name, unsigned count,
  */
 int rte_ring_set_water_mark(struct rte_ring *r, unsigned count);
 
+/*
+ * return a  sum of the struct for each l_core.
+ */
+void rte_ring_get_stats(struct rte_ring * r, struct rte_ring_stats * stats);
+
+#ifdef RTE_LIBRTE_IVSHMEM
+static inline void check_ring_remapping(struct rte_ring * r)
+{
+	if(r->needs_remapping)
+	{
+		RTE_LOG(INFO, RING, "Ring needs remapping\n");
+		
+		/* XXX: what to do if this function fails?
+		 * 	- panic?
+		 *  - return?
+		 *  - nothing?
+		 */
+		rte_eal_ivshmem_remap_segments();
+
+		/* Wait until the host confirms that the ring is usable */
+		rte_spinlock_lock(&r->usable);
+		/* The host confirmed, unlock and continue */
+		rte_spinlock_unlock(&r->usable);
+	}
+}
+#endif
 /**
  * Dump the status of the ring to the console.
  *
@@ -420,6 +475,10 @@ __rte_ring_mp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	uint32_t mask = r->prod.mask;
 	int ret;
 
+#ifdef RTE_LIBRTE_IVSHMEM
+	check_ring_remapping(r);
+#endif
+
 	/* move prod.head atomically */
 	do {
 		/* Reset n to the initial burst count */
@@ -437,12 +496,14 @@ __rte_ring_mp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 		if (unlikely(n > free_entries)) {
 			if (behavior == RTE_RING_QUEUE_FIXED) {
 				__RING_STAT_ADD(r, enq_fail, n);
+				__RING_ERR_STATS_ADD(r, n);
 				return -ENOBUFS;
 			}
 			else {
 				/* No free entry available */
 				if (unlikely(free_entries == 0)) {
 					__RING_STAT_ADD(r, enq_fail, n);
+					__RING_ERR_STATS_ADD(r, n);
 					return 0;
 				}
 
@@ -464,11 +525,14 @@ __rte_ring_mp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 		ret = (behavior == RTE_RING_QUEUE_FIXED) ? -EDQUOT :
 				(int)(n | RTE_RING_QUOT_EXCEED);
 		__RING_STAT_ADD(r, enq_quota, n);
+
 	}
 	else {
 		ret = (behavior == RTE_RING_QUEUE_FIXED) ? 0 : n;
 		__RING_STAT_ADD(r, enq_success, n);
 	}
+
+	__RING_TX_STATS_ADD(r, n);
 
 	/*
 	 * If there are other enqueues in progress that preceded us,
@@ -522,6 +586,10 @@ __rte_ring_sp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	uint32_t mask = r->prod.mask;
 	int ret;
 
+#ifdef RTE_LIBRTE_IVSHMEM
+	check_ring_remapping(r);
+#endif
+
 	prod_head = r->prod.head;
 	cons_tail = r->cons.tail;
 	/* The subtraction is done between two unsigned 32bits value
@@ -534,12 +602,14 @@ __rte_ring_sp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 	if (unlikely(n > free_entries)) {
 		if (behavior == RTE_RING_QUEUE_FIXED) {
 			__RING_STAT_ADD(r, enq_fail, n);
+			__RING_ERR_STATS_ADD(r, n);
 			return -ENOBUFS;
 		}
 		else {
 			/* No free entry available */
 			if (unlikely(free_entries == 0)) {
 				__RING_STAT_ADD(r, enq_fail, n);
+				__RING_ERR_STATS_ADD(r, n);
 				return 0;
 			}
 
@@ -564,6 +634,8 @@ __rte_ring_sp_do_enqueue(struct rte_ring *r, void * const *obj_table,
 		ret = (behavior == RTE_RING_QUEUE_FIXED) ? 0 : n;
 		__RING_STAT_ADD(r, enq_success, n);
 	}
+
+	__RING_TX_STATS_ADD(r, n);
 
 	r->prod.tail = prod_next;
 	return ret;
@@ -606,6 +678,10 @@ __rte_ring_mc_do_dequeue(struct rte_ring *r, void **obj_table,
 	int success;
 	unsigned i, rep = 0;
 	uint32_t mask = r->prod.mask;
+
+#ifdef RTE_LIBRTE_IVSHMEM
+	check_ring_remapping(r);
+#endif
 
 	/* move cons.head atomically */
 	do {
@@ -698,6 +774,10 @@ __rte_ring_sc_do_dequeue(struct rte_ring *r, void **obj_table,
 	uint32_t cons_next, entries;
 	unsigned i;
 	uint32_t mask = r->prod.mask;
+
+#ifdef RTE_LIBRTE_IVSHMEM
+	check_ring_remapping(r);
+#endif
 
 	cons_head = r->cons.head;
 	prod_tail = r->prod.tail;
@@ -1024,6 +1104,8 @@ rte_ring_dequeue(struct rte_ring *r, void **obj_p)
 static inline int
 rte_ring_full(const struct rte_ring *r)
 {
+	//check_ring_remapping(r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return (((cons_tail - prod_tail - 1) & r->prod.mask) == 0);
@@ -1041,6 +1123,8 @@ rte_ring_full(const struct rte_ring *r)
 static inline int
 rte_ring_empty(const struct rte_ring *r)
 {
+	//check_ring_remapping(r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return !!(cons_tail == prod_tail);
@@ -1057,6 +1141,8 @@ rte_ring_empty(const struct rte_ring *r)
 static inline unsigned
 rte_ring_count(const struct rte_ring *r)
 {
+	//check_ring_remapping(r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return ((prod_tail - cons_tail) & r->prod.mask);
@@ -1073,6 +1159,8 @@ rte_ring_count(const struct rte_ring *r)
 static inline unsigned
 rte_ring_free_count(const struct rte_ring *r)
 {
+	//check_ring_remapping((struct rte_ring *) r);
+
 	uint32_t prod_tail = r->prod.tail;
 	uint32_t cons_tail = r->cons.tail;
 	return ((cons_tail - prod_tail - 1) & r->prod.mask);
