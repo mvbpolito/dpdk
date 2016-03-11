@@ -611,10 +611,10 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 	if(name == NULL || md_name == NULL)
 		return -1;
 
-	config = get_config_by_name(name);
+	config = get_config_by_name(md_name);
 
 	if (config == NULL) {
-		RTE_LOG(ERR, EAL, "Cannot find IVSHMEM config %s!\n", name);
+		RTE_LOG(ERR, EAL, "Cannot find IVSHMEM config %s!\n", md_name);
 		return -1;
 	}
 
