@@ -632,6 +632,7 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 
 	rte_spinlock_lock(&config->sl);
 	metadata = config->metadata;
+	/* look for a free entry in the metadata file */
 	for(i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS; i++) {
 		if(metadata->pmd_rings[i].name[0] == '\0')
 			break;
@@ -642,8 +643,19 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 		goto err;
 	}
 
+	/* copy the device name */
 	snprintf(metadata->pmd_rings[i].name, sizeof(metadata->pmd_rings[i].name),
 		"%s", name);
+
+	metadata->pmd_rings[i].nb_rx_queues = nb_rx_queues;
+	metadata->pmd_rings[i].nb_tx_queues = nb_tx_queues;
+
+	memcpy(metadata->pmd_rings[i].rx_queues, rx_queues,
+			nb_rx_queues*sizeof(rx_queues[0]));
+
+	memcpy(metadata->pmd_rings[i].tx_queues, tx_queues,
+			nb_tx_queues*sizeof(tx_queues[0]));
+
 	rte_spinlock_unlock(&config->sl);
 	return 0;
 
