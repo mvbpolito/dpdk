@@ -585,6 +585,74 @@ rte_ivshmem_metadata_add_ring(const struct rte_ring * r, const char * name)
 }
 
 int
+rte_ivshmem_metadata_add_pmd_ring(const char * name,
+		struct rte_ring * const rx_queues[], const unsigned nb_rx_queues,
+		struct rte_ring * const tx_queues[], const unsigned nb_tx_queues,
+		const char * md_name)
+{
+	struct ivshmem_config * config;
+	struct rte_ivshmem_metadata * metadata;
+	int ret;
+	unsigned i;
+
+	/* do some parameter checking */
+	if (rx_queues == NULL && nb_rx_queues > 0)
+		return -1;
+
+	if (tx_queues == NULL && nb_tx_queues > 0)
+		return -1;
+
+	if (nb_rx_queues > RTE_PMD_RING_MAX_RX_RINGS)
+		return -1;
+
+	if (nb_tx_queues > RTE_PMD_RING_MAX_TX_RINGS)
+		return -1;
+
+	if(name == NULL || md_name == NULL)
+		return -1;
+
+	config = get_config_by_name(name);
+
+	if (config == NULL) {
+		RTE_LOG(ERR, EAL, "Cannot find IVSHMEM config %s!\n", name);
+		return -1;
+	}
+
+	for(i = 0; i < nb_rx_queues; i++) {
+		ret = add_ring_to_metadata(rx_queues[i], config);
+		if(ret < 0)
+			return -1;
+	}
+
+	for(i = 0; i < nb_tx_queues; i++) {
+		ret = add_ring_to_metadata(tx_queues[i], config);
+		if(ret < 0)
+			return -1;
+	}
+
+	rte_spinlock_lock(&config->sl);
+	metadata = config->metadata;
+	for(i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS; i++) {
+		if(metadata->pmd_rings[i].name[0] == '\0')
+			break;
+	}
+
+	if(i == RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS) {
+		RTE_LOG(ERR, EAL, "No space left in PMD Ring list!\n");
+		goto err;
+	}
+
+	snprintf(metadata->pmd_rings[i].name, sizeof(metadata->pmd_rings[i].name),
+		"%s", name);
+	rte_spinlock_unlock(&config->sl);
+	return 0;
+
+err:
+	rte_spinlock_unlock(&config->sl);
+	return -1;
+}
+
+int
 rte_ivshmem_metadata_add_memzone(const struct rte_memzone * mz, const char * name)
 {
 	struct ivshmem_config * config;

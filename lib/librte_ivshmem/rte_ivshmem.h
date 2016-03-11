@@ -36,6 +36,7 @@
 
 #include <rte_memzone.h>
 #include <rte_mempool.h>
+#include <rte_ethdev.h>
 
 /**
  * @file
@@ -61,13 +62,27 @@ struct rte_ivshmem_metadata_entry {
 };
 
 /**
+ * Structure that holds a PMD ring entry.
+ */
+struct rte_ivshmem_metadata_pmd_ring {
+	char name[RTE_ETH_NAME_MAX_LEN];	/**< name of the PMD ring device */
+	unsigned nb_rx_queues;
+	unsigned nb_tx_queues;
+
+	struct rte_ring *rx_queues[RTE_PMD_RING_MAX_RX_RINGS];
+	struct rte_ring *tx_queues[RTE_PMD_RING_MAX_TX_RINGS];
+};
+
+/**
  * Structure that holds IVSHMEM metadata.
  */
 struct rte_ivshmem_metadata {
 	int magic_number;				/**< magic number */
 	char name[IVSHMEM_NAME_LEN];	/**< name of the metadata file */
+	/**< metadata entries */
 	struct rte_ivshmem_metadata_entry entry[RTE_LIBRTE_IVSHMEM_MAX_ENTRIES];
-			/**< metadata entries */
+	/**< pmd ring entries */
+	struct rte_ivshmem_metadata_pmd_ring pmd_rings[RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS];
 };
 
 /**
@@ -110,6 +125,15 @@ int rte_ivshmem_metadata_add_memzone(const struct rte_memzone * mz,
  *  - On failure, a negative value
  */
 int rte_ivshmem_metadata_add_ring(const struct rte_ring * r,
+		const char * md_name);
+
+/**
+ * Adds a pmd ring to a specific metadata file
+ *
+ */
+int rte_ivshmem_metadata_add_pmd_ring(const char *name,
+		struct rte_ring * const rx_queues[], const unsigned nb_rx_queues,
+		struct rte_ring * const tx_queues[], const unsigned nb_tx_queues,
 		const char * md_name);
 
 /**

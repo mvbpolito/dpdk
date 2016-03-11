@@ -53,6 +53,7 @@
 #include <rte_malloc.h>
 #include <rte_common.h>
 #include <rte_ivshmem.h>
+#include <rte_eth_ring.h>
 
 #include "eal_internal_cfg.h"
 #include "eal_private.h"
@@ -94,6 +95,8 @@ struct ivshmem_shared_config {
 	uint32_t segment_idx;
 	struct ivshmem_pci_device pci_devs[RTE_LIBRTE_IVSHMEM_MAX_PCI_DEVS];
 	uint32_t pci_devs_idx;
+	struct rte_ivshmem_metadata_pmd_ring pmd_rings[RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS];
+	uint32_t pmd_rings_idx;
 };
 static struct ivshmem_shared_config * ivshmem_config;
 static int memseg_idx;
@@ -328,6 +331,7 @@ read_metadata(char * path, int path_len, int fd, uint64_t flen)
 {
 	struct rte_ivshmem_metadata metadata;
 	struct rte_ivshmem_metadata_entry * entry;
+	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
 	int idx, i;
 	void * ptr;
 
@@ -368,6 +372,27 @@ read_metadata(char * path, int path_len, int fd, uint64_t flen)
 		idx++;
 	}
 	ivshmem_config->segment_idx = idx;
+
+	/* read pmd rings */
+	idx = ivshmem_config->pmd_rings_idx;
+	for(i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS; i++) {
+
+		if(idx == RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS)
+		{
+			RTE_LOG(ERR, EAL, "Not enough pmd ring entries!\n");
+			return -1;
+		}
+
+		pmd_ring = &metadata.pmd_rings[i];
+
+		if(pmd_ring->name[0] == '\0')
+			break;
+
+		memcpy(&ivshmem_config->pmd_rings[idx], pmd_ring, sizeof(*pmd_ring));
+
+		idx++;
+	}
+	ivshmem_config->pmd_rings_idx = idx;
 
 	return 0;
 }
@@ -743,10 +768,12 @@ rte_eal_ivshmem_obj_init(void)
 	struct rte_mem_config * mcfg;
 	struct ivshmem_segment * seg;
 	struct rte_memzone * mz;
+	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
 	struct rte_ring * r;
 	struct rte_tailq_entry *te;
 	unsigned i, ms, idx;
 	uint64_t offset;
+	int ret;
 
 	/* secondary process would not need any object discovery - it'll all
 	 * already be in shared config */
@@ -823,6 +850,22 @@ rte_eal_ivshmem_obj_init(void)
 		TAILQ_INSERT_TAIL(ring_list, te, next);
 
 		RTE_LOG(DEBUG, EAL, "Found ring: '%s' at %p\n", r->name, mz->addr);
+	}
+
+	/* find pmd rings */
+	for(i = 0; i < ivshmem_config->pmd_rings_idx; i++)
+	{
+		pmd_ring = &ivshmem_config->pmd_rings[i];
+		ret = rte_eth_from_rings(pmd_ring->name,
+				pmd_ring->rx_queues, pmd_ring->nb_rx_queues,
+				pmd_ring->tx_queues, pmd_ring->nb_tx_queues,
+				0);	/*XXX: what about NUMA node? */
+		if(ret == -1)
+		{
+			RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",
+				pmd_ring->name);
+			return -1;
+		}
 	}
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
 

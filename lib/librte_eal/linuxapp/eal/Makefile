@@ -44,6 +44,8 @@ CFLAGS += -I$(RTE_SDK)/lib/librte_eal/common
 CFLAGS += -I$(RTE_SDK)/lib/librte_eal/common/include
 CFLAGS += -I$(RTE_SDK)/lib/librte_ring
 CFLAGS += -I$(RTE_SDK)/lib/librte_mempool
+CFLAGS += -I$(RTE_SDK)/lib/librte_ether
+CFLAGS += -I$(RTE_SDK)/lib/librte_mbuf
 CFLAGS += -I$(RTE_SDK)/lib/librte_ivshmem
 CFLAGS += $(WERROR_FLAGS) -O3
 
