@@ -249,9 +249,8 @@ rte_eth_dev_create_unique_device_name(char *name, size_t size,
 	if ((name == NULL) || (pci_dev == NULL))
 		return -EINVAL;
 
-	ret = snprintf(name, size, "%d:%d.%d",
-			pci_dev->addr.bus, pci_dev->addr.devid,
-			pci_dev->addr.function);
+	ret = snprintf(name, size, PCI_PRI_FMT, pci_dev->addr.domain,
+			pci_dev->addr.bus, pci_dev->addr.devid, pci_dev->addr.function);
 	if (ret < 0)
 		return ret;
 	return 0;
@@ -480,7 +479,7 @@ rte_eth_dev_get_port_by_name(const char *name, uint8_t *port_id)
 		if (!strncmp(name,
 			rte_eth_dev_data[devices_map[i]].name, strlen(name))) {
 
-			*port_id = i;
+			*port_id = devices_map[i];
 
 			return 0;
 		}
@@ -508,7 +507,7 @@ rte_eth_dev_get_port_by_addr(const struct rte_pci_addr *addr, uint8_t *port_id)
 		if (pci_dev &&
 			!rte_eal_compare_pci_addr(&pci_dev->addr, addr)) {
 
-			*port_id = i;
+			*port_id = devices_map[i];
 
 			return 0;
 		}
@@ -3277,4 +3276,84 @@ rte_eth_copy_pci_info(struct rte_eth_dev *eth_dev, struct rte_pci_device *pci_de
 	eth_dev->data->kdrv = pci_dev->kdrv;
 	eth_dev->data->numa_node = pci_dev->numa_node;
 	eth_dev->data->drv_name = pci_dev->driver->name;
+}
+
+int rte_eth_change_device(const char * old, const char * new)
+{
+	uint8_t old_portid, new_portid;
+	int ret;
+	char devname[RTE_ETH_NAME_MAX_LEN];
+
+	struct rte_eth_conf port_conf;
+	struct rte_eth_rxq_info rxq_info;
+	struct rte_eth_txq_info txq_info;
+
+	/* does the old port exist? */
+	ret = rte_eth_dev_get_port_by_name(old, &old_portid);
+	if (ret < 0) {
+		RTE_PMD_DEBUG_TRACE("port '%s' not found\n" , old);
+		return -1;
+	}
+
+	/* try to attach to new port */
+	ret = rte_eth_dev_attach(new, &new_portid);
+	if(ret < 0) {
+		RTE_PMD_DEBUG_TRACE("Failed to attach '%s'\n" , new);
+		return -1;
+	}
+
+	/* configure new port based on old port */
+	port_conf = rte_eth_dev_data[devices_map[old_portid]].dev_conf;
+
+	/*
+	 * XXX: at this point just a basic setup is done
+	 * - single queue for rx and tx
+	 */
+	ret = rte_eth_dev_configure(new_portid, 1, 1, &port_conf);
+	if(ret < 0) {
+		RTE_PMD_DEBUG_TRACE("Cannot configure device '%s'\n" , new);
+		return -1;
+	}
+
+	/* config rx queue*/
+	ret = rte_eth_rx_queue_info_get(old_portid, 0, &rxq_info);
+	if(ret < 0) {
+		RTE_PMD_DEBUG_TRACE("Cannot get rx queue info\n");
+		return -1;
+	}
+
+	ret = rte_eth_rx_queue_setup(new_portid, 0, rxq_info.nb_desc,
+			rte_eth_dev_socket_id(new_portid), &rxq_info.conf, rxq_info.mp);
+	if(ret < 0) {
+		RTE_PMD_DEBUG_TRACE("Cannot rte_eth_rx_queue_setup\n");
+		return -1;
+	}
+
+	/* config tx queue */
+	ret = rte_eth_tx_queue_info_get(old_portid, 0, &txq_info);
+	if(ret < 0) {
+		RTE_PMD_DEBUG_TRACE("Cannot get tx queue info\n");
+		return -1;
+	}
+
+	ret = rte_eth_tx_queue_setup(new_portid, 0, txq_info.nb_desc,
+			rte_eth_dev_socket_id(new_portid), &txq_info.conf);
+	if(ret < 0) {
+		RTE_PMD_DEBUG_TRACE("Cannot rte_eth_rx_queue_setup\n");
+		return -1;
+	}
+
+	rte_eth_dev_start(new_portid);
+
+	/* swap the devices */
+	uint8_t t = devices_map[old_portid]; /* original port id */
+	devices_map[old_portid] = new_portid;
+	devices_map[new_portid] = t;
+
+	//rte_eth_dev_stop(new_portid);
+	//rte_eth_dev_close(new_portid);
+	//rte_eth_dev_detach(new_portid, devname);
+	(void) devname;
+
+	return 0;
 }

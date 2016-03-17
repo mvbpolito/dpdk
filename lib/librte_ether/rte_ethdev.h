@@ -2414,11 +2414,8 @@ extern int rte_eth_dev_set_vlan_pvid(uint8_t port_id, uint16_t pvid, int on);
 static inline struct rte_eth_dev *
 get_mapped_port(uint8_t port_id)
 {
-	int ret = devices_map[port_id];
-	printf("getting port: %d -> %d\n", port_id, ret);
-
 	/* XXX: error control */
-	return &rte_eth_devices[ret];
+	return &rte_eth_devices[devices_map[port_id]];
 }
 
 /**
@@ -3897,6 +3894,8 @@ const struct rte_memzone *
 rte_eth_dma_zone_reserve(const struct rte_eth_dev *eth_dev, const char *name,
 			 uint16_t queue_id, size_t size,
 			 unsigned align, int socket_id);
+
+int rte_eth_change_device(const char * old, const char * new);
 
 #ifdef __cplusplus
 }
