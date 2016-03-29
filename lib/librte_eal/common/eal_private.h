@@ -151,6 +151,12 @@ int rte_eal_ivshmem_init(void);
 int rte_eal_ivshmem_obj_init(void);
 #endif
 
+#ifdef RTE_LIBRTE_VIRTIO_SERIAL
+
+int rte_eal_virtio_init(void);
+
+#endif
+
 struct rte_pci_driver;
 struct rte_pci_device;
 

@@ -71,6 +71,9 @@ SRCS-$(CONFIG_RTE_LIBRTE_EAL_LINUXAPP) += eal_alarm.c
 ifeq ($(CONFIG_RTE_LIBRTE_IVSHMEM),y)
 SRCS-$(CONFIG_RTE_LIBRTE_EAL_LINUXAPP) += eal_ivshmem.c
 endif
+ifeq ($(CONFIG_RTE_LIBRTE_VIRTIO_SERIAL),y)
+SRCS-$(CONFIG_RTE_LIBRTE_EAL_LINUXAPP) += eal_virtio_serial.c
+endif
 
 # from common dir
 SRCS-$(CONFIG_RTE_LIBRTE_EAL_LINUXAPP) += eal_common_lcore.c

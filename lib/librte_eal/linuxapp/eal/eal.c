@@ -877,6 +877,10 @@ rte_eal_init(int argc, char **argv)
 	if (rte_eal_pci_probe())
 		rte_panic("Cannot probe PCI\n");
 
+#ifdef RTE_LIBRTE_VIRTIO_SERIAL
+	rte_eal_virtio_init();
+#endif
+
 	return fctret;
 }
 
