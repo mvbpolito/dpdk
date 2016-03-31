@@ -588,10 +588,7 @@ map_segments(struct rte_ivshmem_metadata_entry * entries, int n, int fd,
 	int fd_zero;
 
 	for (i = 0; i < n; i++) {
-		//if (i == RTE_MAX_MEMSEG) {
-		//	RTE_LOG(ERR, EAL, "Too many segments requested!\n");
-		//	return -1;
-		//}
+
 		entry = &entries[i];
 
 		/* copy segment to table */
@@ -684,12 +681,7 @@ map_segments(struct rte_ivshmem_metadata_entry * entries, int n, int fd,
 		ms.ioremap_addr += seg->align;
 		ms.len -= seg->align;	/* XXX: is this ok? */
 
-		/* at this point, the rest of DPDK memory is not initialized, so we
-		 * expect memsegs to be empty */
-		memcpy(&mcfg->memseg[j++], &ms, sizeof(struct rte_memseg));
-
-		//RTE_LOG(DEBUG, EAL, "IVSHMEM segment found, size: 0x%lx\n",
-		//		ms.len);
+		memcpy(&mcfg->memseg[j++], &ms, sizeof(ms));
 	}
 
 	return 0;
