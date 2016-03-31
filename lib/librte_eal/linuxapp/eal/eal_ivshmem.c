@@ -886,24 +886,12 @@ int rte_eal_ivshmem_init(void)
 	}
 	else {
 
-		TAILQ_FOREACH(dev, &pci_device_list, next) {
+		TAILQ_FOREACH(dev, &pci_device_list, next)
+			if (ivshmem_probe_device(dev))
+				return -1;
 
-			if (ivshmem_probe_device(dev)) {
-
-			}
-		}
+		RTE_LOG(DEBUG, EAL, "No IVSHMEM devices found!\n");
 	}
-
-	///* ivshmem_config is not NULL only if config was created and/or mapped */
-	//if (ivshmem_config) {
-	//	if (map_all_segments() < 0) {
-	//		RTE_LOG(ERR, EAL, "Mapping IVSHMEM segments failed!\n");
-	//		return -1;
-	//	}
-	//}
-	//else {
-	//	RTE_LOG(DEBUG, EAL, "No IVSHMEM configuration found! \n");
-	//}
 
 	return 0;
 }
