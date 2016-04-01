@@ -795,6 +795,9 @@ rte_eal_ivshmem_obj_init(void)
 
 	mcfg = rte_eal_get_configuration()->mem_config;
 
+	rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
+
+
 	/* create memzones */
 	for (i = 0; i < ivshmem_config->memzone_cnt && i <= RTE_MAX_MEMZONE; i++) {
 
@@ -829,18 +832,8 @@ rte_eal_ivshmem_obj_init(void)
 		}
 
 		mcfg->memzone_cnt++;
-	}
 
-	/* the memzones were mapped */
-	ivshmem_config->memzone_cnt = 0;
-
-	rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
-
-	/* find rings */
-	for (i = 0; i < mcfg->memzone_cnt; i++) {
-		mz = &mcfg->memzone[i];
-
-		/* check if memzone has a ring prefix */
+		/* is this memzone a ring? */
 		if (strncmp(mz->name, RTE_RING_MZ_PREFIX,
 				sizeof(RTE_RING_MZ_PREFIX) - 1) != 0)
 			continue;
@@ -859,6 +852,10 @@ rte_eal_ivshmem_obj_init(void)
 
 		RTE_LOG(DEBUG, EAL, "Found ring: '%s' at %p\n", r->name, mz->addr);
 	}
+
+	/* the memzones were mapped */
+	ivshmem_config->memzone_cnt = 0;
+
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
 
 #ifdef RTE_LIBRTE_IVSHMEM_DEBUG
