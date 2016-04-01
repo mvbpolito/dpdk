@@ -311,7 +311,7 @@ rte_eal_pci_scan_device(const char *device)
 	uint16_t domain;
 	uint8_t bus, devid, function;
 
-	if (parse_pci_addr_format(device, sizeof(device), &domain,
+	if (parse_pci_addr_format(device, strlen(device), &domain,
 			&bus, &devid, &function) != 0)
 		goto error;	/*XXX: what to do here? */
 
@@ -448,7 +448,7 @@ rte_eal_pci_scan(void)
 
 		dev = rte_eal_pci_scan_device(e->d_name);
 		if (dev == NULL)
-			goto error;
+			continue;
 
 		/* device is valid, add in list (sorted) */
 		if (TAILQ_EMPTY(&pci_device_list)) {
@@ -478,10 +478,6 @@ rte_eal_pci_scan(void)
 	}
 	closedir(dir);
 	return 0;
-
-error:
-	closedir(dir);
-	return -1;
 }
 
 #ifdef RTE_PCI_CONFIG
