@@ -182,6 +182,9 @@ int rte_ivshmem_metadata_cmdline_generate(char *buffer, unsigned size,
 void rte_ivshmem_metadata_dump(FILE *f, const char *name);
 
 
+/* XXX: build documentation */
+int rte_ivshmem_dev_attach(const char * dev);
+
 #ifdef __cplusplus
 }
 #endif

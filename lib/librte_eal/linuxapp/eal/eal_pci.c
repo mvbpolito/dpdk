@@ -251,148 +251,6 @@ error:
 	return -1;
 }
 
-/* Scan one pci sysfs entry, and fill the devices list from it. */
-static int
-pci_scan_one(const char *dirname, uint16_t domain, uint8_t bus,
-	     uint8_t devid, uint8_t function)
-{
-	char filename[PATH_MAX];
-	unsigned long tmp;
-	struct rte_pci_device *dev;
-	char driver[PATH_MAX];
-	int ret;
-
-	dev = malloc(sizeof(*dev));
-	if (dev == NULL)
-		return -1;
-
-	memset(dev, 0, sizeof(*dev));
-	dev->addr.domain = domain;
-	dev->addr.bus = bus;
-	dev->addr.devid = devid;
-	dev->addr.function = function;
-
-	/* get vendor id */
-	snprintf(filename, sizeof(filename), "%s/vendor", dirname);
-	if (eal_parse_sysfs_value(filename, &tmp) < 0) {
-		free(dev);
-		return -1;
-	}
-	dev->id.vendor_id = (uint16_t)tmp;
-
-	/* get device id */
-	snprintf(filename, sizeof(filename), "%s/device", dirname);
-	if (eal_parse_sysfs_value(filename, &tmp) < 0) {
-		free(dev);
-		return -1;
-	}
-	dev->id.device_id = (uint16_t)tmp;
-
-	/* get subsystem_vendor id */
-	snprintf(filename, sizeof(filename), "%s/subsystem_vendor",
-		 dirname);
-	if (eal_parse_sysfs_value(filename, &tmp) < 0) {
-		free(dev);
-		return -1;
-	}
-	dev->id.subsystem_vendor_id = (uint16_t)tmp;
-
-	/* get subsystem_device id */
-	snprintf(filename, sizeof(filename), "%s/subsystem_device",
-		 dirname);
-	if (eal_parse_sysfs_value(filename, &tmp) < 0) {
-		free(dev);
-		return -1;
-	}
-	dev->id.subsystem_device_id = (uint16_t)tmp;
-
-	/* get max_vfs */
-	dev->max_vfs = 0;
-	snprintf(filename, sizeof(filename), "%s/max_vfs", dirname);
-	if (!access(filename, F_OK) &&
-	    eal_parse_sysfs_value(filename, &tmp) == 0)
-		dev->max_vfs = (uint16_t)tmp;
-	else {
-		/* for non igb_uio driver, need kernel version >= 3.8 */
-		snprintf(filename, sizeof(filename),
-			 "%s/sriov_numvfs", dirname);
-		if (!access(filename, F_OK) &&
-		    eal_parse_sysfs_value(filename, &tmp) == 0)
-			dev->max_vfs = (uint16_t)tmp;
-	}
-
-	/* get numa node */
-	snprintf(filename, sizeof(filename), "%s/numa_node",
-		 dirname);
-	if (access(filename, R_OK) != 0) {
-		/* if no NUMA support, set default to 0 */
-		dev->numa_node = 0;
-	} else {
-		if (eal_parse_sysfs_value(filename, &tmp) < 0) {
-			free(dev);
-			return -1;
-		}
-		dev->numa_node = tmp;
-	}
-
-	/* parse resources */
-	snprintf(filename, sizeof(filename), "%s/resource", dirname);
-	if (pci_parse_sysfs_resource(filename, dev) < 0) {
-		RTE_LOG(ERR, EAL, "%s(): cannot parse resource\n", __func__);
-		free(dev);
-		return -1;
-	}
-
-	/* parse driver */
-	snprintf(filename, sizeof(filename), "%s/driver", dirname);
-	ret = pci_get_kernel_driver_by_path(filename, driver);
-	if (ret < 0) {
-		RTE_LOG(ERR, EAL, "Fail to get kernel driver\n");
-		free(dev);
-		return -1;
-	}
-
-	if (!ret) {
-		if (!strcmp(driver, "vfio-pci"))
-			dev->kdrv = RTE_KDRV_VFIO;
-		else if (!strcmp(driver, "igb_uio"))
-			dev->kdrv = RTE_KDRV_IGB_UIO;
-		else if (!strcmp(driver, "uio_pci_generic"))
-			dev->kdrv = RTE_KDRV_UIO_GENERIC;
-		else
-			dev->kdrv = RTE_KDRV_UNKNOWN;
-	} else
-		dev->kdrv = RTE_KDRV_UNKNOWN;
-
-	/* device is valid, add in list (sorted) */
-	if (TAILQ_EMPTY(&pci_device_list)) {
-		TAILQ_INSERT_TAIL(&pci_device_list, dev, next);
-	} else {
-		struct rte_pci_device *dev2;
-		int ret;
-
-		TAILQ_FOREACH(dev2, &pci_device_list, next) {
-			ret = rte_eal_compare_pci_addr(&dev->addr, &dev2->addr);
-			if (ret > 0)
-				continue;
-
-			if (ret < 0) {
-				TAILQ_INSERT_BEFORE(dev2, dev, next);
-			} else { /* already registered */
-				dev2->kdrv = dev->kdrv;
-				dev2->max_vfs = dev->max_vfs;
-				memmove(dev2->mem_resource, dev->mem_resource,
-					sizeof(dev->mem_resource));
-				free(dev);
-			}
-			return 0;
-		}
-		TAILQ_INSERT_TAIL(&pci_device_list, dev, next);
-	}
-
-	return 0;
-}
-
 /*
  * split up a pci address into its constituent parts.
  */
@@ -440,6 +298,132 @@ error:
 	return -1;
 }
 
+/* Scan one pci sysfs entry, returns it. */
+struct rte_pci_device *
+rte_eal_pci_scan_device(const char *device)
+{
+	char filename[PATH_MAX];
+	char dirname[PATH_MAX];
+	unsigned long tmp;
+	struct rte_pci_device *dev = NULL;
+	char driver[PATH_MAX];
+	int ret;
+	uint16_t domain;
+	uint8_t bus, devid, function;
+
+	if (parse_pci_addr_format(device, strlen(device), &domain,
+			&bus, &devid, &function) != 0)
+		goto error;	/*XXX: what to do here? */
+
+	snprintf(dirname, sizeof(dirname), "%s/%s", SYSFS_PCI_DEVICES, device);
+
+	dev = malloc(sizeof(*dev));
+	if (dev == NULL)
+		goto error;
+
+	memset(dev, 0, sizeof(*dev));
+	dev->addr.domain = domain;
+	dev->addr.bus = bus;
+	dev->addr.devid = devid;
+	dev->addr.function = function;
+
+	/* get vendor id */
+	snprintf(filename, sizeof(filename), "%s/vendor", dirname);
+	if (eal_parse_sysfs_value(filename, &tmp) < 0)
+		goto error;
+
+	dev->id.vendor_id = (uint16_t)tmp;
+
+	/* get device id */
+	snprintf(filename, sizeof(filename), "%s/device", dirname);
+	if (eal_parse_sysfs_value(filename, &tmp) < 0)
+		goto error;
+
+	dev->id.device_id = (uint16_t)tmp;
+
+	/* get subsystem_vendor id */
+	snprintf(filename, sizeof(filename), "%s/subsystem_vendor",
+		 dirname);
+	if (eal_parse_sysfs_value(filename, &tmp) < 0)
+		goto error;
+
+	dev->id.subsystem_vendor_id = (uint16_t)tmp;
+
+	/* get subsystem_device id */
+	snprintf(filename, sizeof(filename), "%s/subsystem_device",
+		 dirname);
+	if (eal_parse_sysfs_value(filename, &tmp) < 0)
+		goto error;
+
+	dev->id.subsystem_device_id = (uint16_t)tmp;
+
+	/* get max_vfs */
+	dev->max_vfs = 0;
+	snprintf(filename, sizeof(filename), "%s/max_vfs", dirname);
+	if (!access(filename, F_OK) &&
+	    eal_parse_sysfs_value(filename, &tmp) == 0)
+		dev->max_vfs = (uint16_t)tmp;
+	else {
+		/* for non igb_uio driver, need kernel version >= 3.8 */
+		snprintf(filename, sizeof(filename),
+			 "%s/sriov_numvfs", dirname);
+		if (!access(filename, F_OK) &&
+		    eal_parse_sysfs_value(filename, &tmp) == 0)
+			dev->max_vfs = (uint16_t)tmp;
+	}
+
+	/* get numa node */
+	snprintf(filename, sizeof(filename), "%s/numa_node",
+		 dirname);
+	if (access(filename, R_OK) != 0) {
+		/* if no NUMA support, set default to 0 */
+		dev->numa_node = 0;
+	} else {
+		if (eal_parse_sysfs_value(filename, &tmp) < 0) {
+			free(dev);
+			return NULL;
+		}
+		dev->numa_node = tmp;
+	}
+
+	/* parse resources */
+	snprintf(filename, sizeof(filename), "%s/resource", dirname);
+	if (pci_parse_sysfs_resource(filename, dev) < 0) {
+		RTE_LOG(ERR, EAL, "%s(): cannot parse resource\n", __func__);
+		free(dev);
+		return NULL;
+	}
+
+	/* parse driver */
+	snprintf(filename, sizeof(filename), "%s/driver", dirname);
+	ret = pci_get_kernel_driver_by_path(filename, driver);
+	if (ret < 0) {
+		RTE_LOG(ERR, EAL, "Fail to get kernel driver\n");
+		free(dev);
+		return NULL;
+	}
+
+	if (!ret) {
+		if (!strcmp(driver, "vfio-pci"))
+			dev->kdrv = RTE_KDRV_VFIO;
+		else if (!strcmp(driver, "igb_uio"))
+			dev->kdrv = RTE_KDRV_IGB_UIO;
+		else if (!strcmp(driver, "uio_pci_generic"))
+			dev->kdrv = RTE_KDRV_UIO_GENERIC;
+		else
+			dev->kdrv = RTE_KDRV_UNKNOWN;
+	} else
+		dev->kdrv = RTE_KDRV_UNKNOWN;
+
+	return dev;
+
+error:
+	free(dev);
+	return NULL;
+
+	return 0;
+}
+
 /*
  * Scan the content of the PCI bus, and the devices in the devices
  * list
@@ -449,9 +433,7 @@ rte_eal_pci_scan(void)
 {
 	struct dirent *e;
 	DIR *dir;
-	char dirname[PATH_MAX];
-	uint16_t domain;
-	uint8_t bus, devid, function;
+	struct rte_pci_device *dev;
 
 	dir = opendir(SYSFS_PCI_DEVICES);
 	if (dir == NULL) {
@@ -464,21 +446,38 @@ rte_eal_pci_scan(void)
 		if (e->d_name[0] == '.')
 			continue;
 
-		if (parse_pci_addr_format(e->d_name, sizeof(e->d_name), &domain,
-				&bus, &devid, &function) != 0)
+		dev = rte_eal_pci_scan_device(e->d_name);
+		if (dev == NULL)
 			continue;
 
-		snprintf(dirname, sizeof(dirname), "%s/%s", SYSFS_PCI_DEVICES,
-			 e->d_name);
-		if (pci_scan_one(dirname, domain, bus, devid, function) < 0)
-			goto error;
+		/* device is valid, add in list (sorted) */
+		if (TAILQ_EMPTY(&pci_device_list)) {
+			TAILQ_INSERT_TAIL(&pci_device_list, dev, next);
+		} else {
+			struct rte_pci_device *dev2;
+			int ret;
+
+			TAILQ_FOREACH(dev2, &pci_device_list, next) {
+				ret = rte_eal_compare_pci_addr(&dev->addr, &dev2->addr);
+				if (ret > 0)
+					continue;
+
+				if (ret < 0) {
+					TAILQ_INSERT_BEFORE(dev2, dev, next);
+				} else { /* already registered */
+					dev2->kdrv = dev->kdrv;
+					dev2->max_vfs = dev->max_vfs;
+					memmove(dev2->mem_resource, dev->mem_resource,
+						sizeof(dev->mem_resource));
+					free(dev);
+				}
+				return 0;
+			}
+			TAILQ_INSERT_TAIL(&pci_device_list, dev, next);
+		}
 	}
 	closedir(dir);
 	return 0;
-
-error:
-	closedir(dir);
-	return -1;
 }
 
 #ifdef RTE_PCI_CONFIG
