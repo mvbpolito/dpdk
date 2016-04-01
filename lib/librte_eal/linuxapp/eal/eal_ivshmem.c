@@ -831,6 +831,9 @@ rte_eal_ivshmem_obj_init(void)
 		mcfg->memzone_cnt++;
 	}
 
+	/* the memzones were mapped */
+	ivshmem_config->memzone_cnt = 0;
+
 	rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
 
 	/* find rings */
@@ -887,10 +890,35 @@ int rte_eal_ivshmem_init(void)
 	else {
 
 		TAILQ_FOREACH(dev, &pci_device_list, next)
-			if (ivshmem_probe_device(dev))
+			if (ivshmem_probe_device(dev) < 0)
 				return -1;
 
 		RTE_LOG(DEBUG, EAL, "No IVSHMEM devices found!\n");
+	}
+
+	return 0;
+}
+
+
+int rte_ivshmem_dev_attach(const char * device)
+{
+	struct rte_pci_device * dev;
+	int ret;
+
+	dev = rte_eal_pci_scan_device(device);
+	if(dev == NULL) {
+		RTE_LOG(ERR, EAL, "Could not attach IVSHMEM device\n");
+		return -1;
+	}
+
+	ret = ivshmem_probe_device(dev);
+	if(ret < 0)
+		return -1;
+
+	ret = rte_eal_ivshmem_obj_init();
+	if(ret < 0) {
+		RTE_LOG(ERR, EAL, "Error adding memzones to DPDK\n");
+		return -1;
 	}
 
 	return 0;
