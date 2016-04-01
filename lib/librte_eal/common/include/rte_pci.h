@@ -353,6 +353,11 @@ rte_eal_compare_pci_addr(const struct rte_pci_addr *addr,
  */
 int rte_eal_pci_scan(void);
 
+
+/* xxx: build config */
+struct rte_pci_device *
+rte_eal_pci_scan_device(const char *device);
+
 /**
  * Probe the PCI bus for registered drivers.
  *
