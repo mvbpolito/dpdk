@@ -891,14 +891,11 @@ rte_eal_ivshmem_obj_init(void)
 			RTE_LOG(DEBUG, EAL, "Found ring: '%s' at %p\n", r->name, mz->addr);
 		}
 
-
 		/* check if memzone has a mempool prefix */
 		if (strncmp(mz->name, RTE_MEMPOOL_MZ_PREFIX,
 				sizeof(RTE_MEMPOOL_MZ_PREFIX) - 1) == 0) {
 
 			mp = (struct rte_mempool*) (mz->addr_64);
-
-			rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
 
 			te = rte_zmalloc("MEMPOOL_TAILQ_ENTRY", sizeof(*te), 0);
 			if (te == NULL) {
