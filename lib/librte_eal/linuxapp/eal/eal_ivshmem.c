@@ -99,6 +99,9 @@ static int pagesz;
 /* Tailq heads to add rings to */
 TAILQ_HEAD(rte_ring_list, rte_tailq_entry);
 
+/* Tailf head to add mempools to */
+TAILQ_HEAD(rte_mempool_list, rte_tailq_entry);
+
 /*
  * Utility functions
  */
@@ -799,10 +802,12 @@ int
 rte_eal_ivshmem_obj_init(void)
 {
 	struct rte_ring_list* ring_list = NULL;
+	struct rte_mempool_list * mempool_list = NULL;
 	struct rte_mem_config * mcfg;
 	struct rte_memzone * mz;
 	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
 	struct rte_ring * r;
+	struct rte_mempool * mp;
 	struct rte_tailq_entry *te;
 	unsigned i, ms, idx;
 	uint64_t offset;
@@ -817,6 +822,13 @@ rte_eal_ivshmem_obj_init(void)
 	ring_list = RTE_TAILQ_LOOKUP(RTE_TAILQ_RING_NAME, rte_ring_list);
 	if (ring_list == NULL) {
 		RTE_LOG(ERR, EAL, "No rte_ring tailq found!\n");
+		return -1;
+	}
+
+	/* check that we have an initialised mempool tail queue */
+	mempool_list = RTE_TAILQ_LOOKUP("RTE_MEMPOOL", rte_mempool_list);
+	if (mempool_list == NULL) {
+		RTE_LOG(ERR, EAL, "No rte_mempool tailq found!\n");
 		return -1;
 	}
 
@@ -862,22 +874,45 @@ rte_eal_ivshmem_obj_init(void)
 
 		/* is this memzone a ring? */
 		if (strncmp(mz->name, RTE_RING_MZ_PREFIX,
-				sizeof(RTE_RING_MZ_PREFIX) - 1) != 0)
-			continue;
+				sizeof(RTE_RING_MZ_PREFIX) - 1) == 0) {
 
-		r = (struct rte_ring*) (mz->addr_64);
+			r = (struct rte_ring*) (mz->addr_64);
 
-		te = rte_zmalloc("RING_TAILQ_ENTRY", sizeof(*te), 0);
-		if (te == NULL) {
-			RTE_LOG(ERR, EAL, "Cannot allocate ring tailq entry!\n");
-			return -1;
+			te = rte_zmalloc("RING_TAILQ_ENTRY", sizeof(*te), 0);
+			if (te == NULL) {
+				RTE_LOG(ERR, EAL, "Cannot allocate ring tailq entry!\n");
+				return -1;
+			}
+
+			te->data = (void *) r;
+
+			TAILQ_INSERT_TAIL(ring_list, te, next);
+
+			RTE_LOG(DEBUG, EAL, "Found ring: '%s' at %p\n", r->name, mz->addr);
 		}
 
-		te->data = (void *) r;
 
-		TAILQ_INSERT_TAIL(ring_list, te, next);
+		/* check if memzone has a mempool prefix */
+		if (strncmp(mz->name, RTE_MEMPOOL_MZ_PREFIX,
+				sizeof(RTE_MEMPOOL_MZ_PREFIX) - 1) == 0) {
 
-		RTE_LOG(DEBUG, EAL, "Found ring: '%s' at %p\n", r->name, mz->addr);
+			mp = (struct rte_mempool*) (mz->addr_64);
+
+			rte_rwlock_write_lock(RTE_EAL_TAILQ_RWLOCK);
+
+			te = rte_zmalloc("MEMPOOL_TAILQ_ENTRY", sizeof(*te), 0);
+			if (te == NULL) {
+				RTE_LOG(ERR, EAL, "Cannot allocate mempool tailq entry!\n");
+				return -1;
+			}
+
+			te->data = (void *) mp;
+
+			TAILQ_INSERT_TAIL(mempool_list, te, next);
+
+			RTE_LOG(DEBUG, EAL, "Found mempool: '%s' at %p\n",
+					mp->name, mz->addr);
+		}
 	}
 
 	/* the memzones were mapped */
