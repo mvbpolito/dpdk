@@ -49,7 +49,4 @@ SYMLINK-$(CONFIG_RTE_LIBRTE_IVSHMEM)-include := rte_ivshmem.h
 # this lib needs eal
 DEPDIRS-$(CONFIG_RTE_LIBRTE_IVSHMEM) += lib/librte_mempool
 
-# this lib needs rte_ethdev
-DEPDIRS-$(CONFIG_RTE_LIBRTE_IVSHMEM) += lib/librte_ether
-
 include $(RTE_SDK)/mk/rte.lib.mk

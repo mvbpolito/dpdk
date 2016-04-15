@@ -36,7 +36,8 @@
 
 #include <rte_memzone.h>
 #include <rte_mempool.h>
-#include <rte_ethdev.h>
+
+#define RTE_ETH_NAME_MAX_LEN (32)
 
 /**
  * @file
@@ -129,7 +130,8 @@ int rte_ivshmem_metadata_add_ring(const struct rte_ring * r,
 
 /**
  * Adds a pmd ring to a specific metadata file
- *
+ * rx and tx queues name convention is from the guest side, it means, the guest
+ * reads from the rx queues and writes to the tx ones.
  */
 int rte_ivshmem_metadata_add_pmd_ring(const char *name,
 		struct rte_ring * const rx_queues[], const unsigned nb_rx_queues,
