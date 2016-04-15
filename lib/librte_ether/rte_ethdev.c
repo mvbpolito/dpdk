@@ -65,6 +65,7 @@
 #include <rte_errno.h>
 #include <rte_spinlock.h>
 #include <rte_string_fns.h>
+#include <rte_ivshmem.h>
 
 #include <rte_eth_ring.h>
 
@@ -631,11 +632,17 @@ int
 rte_eth_dev_attach(const char *devargs, uint8_t *port_id)
 {
 	struct rte_pci_addr addr;
+	char name[RTE_ETH_NAME_MAX_LEN];
 
 	if ((devargs == NULL) || (port_id == NULL))
 		return -EINVAL;
 
 	if (eal_parse_pci_DomBDF(devargs, &addr) == 0)
+		if(rte_ivshmem_ethdev_attach(devargs, name) == 0) {
+			if (rte_eth_dev_get_port_by_name(name, port_id))
+				return -1;
+			return 0;
+		} else
 		return rte_eth_dev_attach_pdev(&addr, port_id);
 	else
 		return rte_eth_dev_attach_vdev(devargs, port_id);
