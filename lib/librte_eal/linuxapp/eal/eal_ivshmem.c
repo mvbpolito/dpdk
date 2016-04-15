@@ -942,6 +942,26 @@ int rte_eal_ivshmem_init(void)
 	return 0;
 }
 
+/* this function is bad implemented.
+ * There should be a check to be sure that the device that was attached contains
+ * an ethernet device.
+ */
+int rte_ivshmem_ethdev_attach(const char * device, char * name)
+{
+	int err;
+	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
+
+	err = rte_ivshmem_dev_attach(device);
+	if(err)
+		return err;
+
+	/* XXX: what about devices with multiple pmd_rings? */
+	pmd_ring = &ivshmem_config->pmd_rings[0];
+
+	strcpy(name, pmd_ring->name);
+
+	return 0;
+}
 
 int rte_ivshmem_dev_attach(const char * device)
 {
@@ -951,6 +971,11 @@ int rte_ivshmem_dev_attach(const char * device)
 	dev = rte_eal_pci_scan_device(device);
 	if(dev == NULL) {
 		RTE_LOG(ERR, EAL, "Could not attach IVSHMEM device\n");
+		return -1;
+	}
+
+	if(!is_ivshmem_device(dev)) {
+		RTE_LOG(ERR, EAL, "Device is not ivshmem\n");
 		return -1;
 	}
 
