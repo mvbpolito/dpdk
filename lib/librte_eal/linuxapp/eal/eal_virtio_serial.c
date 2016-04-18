@@ -12,7 +12,6 @@
 #include "eal_private.h"
 
 #define VIRTIO_SERIAL_PATH "/dev/virtio-ports/dpdk"
-#define CHANGE_PORTS_JSON_FORMAT "old=%s,new=%s"
 
 struct pollfd pollfds;
 
@@ -25,8 +24,8 @@ process_host_request(char * buf, size_t len)
 	char p_old[RTE_ETH_NAME_MAX_LEN];
 	char p_new[RTE_ETH_NAME_MAX_LEN];
 
-	/* buffer overflow .... */
-	sscanf(buf, CHANGE_PORTS_JSON_FORMAT, p_old, p_new);
+	sscanf(strtok(buf, ","), "old=%s", p_old);
+	sscanf(strtok(NULL, ","), "new=%s", p_new);
 
 	rte_eth_change_device(p_old, p_new);
 }
