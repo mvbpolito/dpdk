@@ -3291,6 +3291,9 @@ int rte_eth_change_device(const char * old, const char * new)
 	int ret;
 	char devname[RTE_ETH_NAME_MAX_LEN];
 
+	RTE_LOG(ERR, EAL, "rte_eth: changing devices  '%s' <-> '%s'\n",
+		old, new);
+
 	struct rte_eth_conf port_conf;
 	struct rte_eth_rxq_info rxq_info;
 	struct rte_eth_txq_info txq_info;
