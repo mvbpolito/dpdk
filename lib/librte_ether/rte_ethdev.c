@@ -3312,6 +3312,11 @@ int rte_eth_change_device(const char * old, const char * new)
 		return -1;
 	}
 
+	/* if new device is pmd_ring it has not to be configured*/
+	if(rte_eth_dev_get_device_type(new_portid) == RTE_ETH_DEV_VIRTUAL)
+		goto start;
+
+
 	/* configure new port based on old port */
 	port_conf = rte_eth_dev_data[devices_map[old_portid]].dev_conf;
 
@@ -3353,6 +3358,7 @@ int rte_eth_change_device(const char * old, const char * new)
 		return -1;
 	}
 
+start:
 	rte_eth_dev_start(new_portid);
 
 	/* swap the devices */

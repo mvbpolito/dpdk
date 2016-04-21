@@ -21,8 +21,8 @@ process_host_request(char * buf, size_t len)
 	(void) len;
 	//printf("*** '%s' *****\n", buf);
 
-	char p_old[RTE_ETH_NAME_MAX_LEN];
-	char p_new[RTE_ETH_NAME_MAX_LEN];
+	char p_old[RTE_ETH_NAME_MAX_LEN] = {0};
+	char p_new[RTE_ETH_NAME_MAX_LEN] = {0};
 
 	sscanf(strtok(buf, ","), "old=%s", p_old);
 	sscanf(strtok(NULL, ","), "new=%s", p_new);
@@ -81,7 +81,7 @@ int rte_eal_virtio_init(void)
 		return -1;
 	}
 	ret = fcntl(fd, F_GETFL);
-	ret = fcntl(fd, F_SETFL, ret | O_ASYNC);
+	ret = fcntl(fd, F_SETFL, ret | O_ASYNC | O_NONBLOCK);
 	if (ret < 0)
 	{
 		RTE_LOG(ERR, EAL, "Failed to fcntl O_ASYNC\n");
