@@ -79,6 +79,10 @@ int rte_eth_from_rings(const char *name,
  */
 int rte_eth_from_ring(struct rte_ring *r);
 
+int rte_eth_ring_add_secondary_device(uint8_t primary_id, uint8_t secondary_id);
+
+int rte_eth_ring_remove_secondary_device(uint8_t primary_id);
+
 #ifdef __cplusplus
 }
 #endif

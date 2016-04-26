@@ -51,19 +51,42 @@ static const char *valid_arguments[] = {
 	NULL
 };
 
-struct ring_queue {
+struct rx_ring_queue {
 	struct rte_ring *rng;
+	uint8_t primary_id;
+	uint8_t secondary_id;
+
+	uint16_t nb_rx_desc;
+	/**< Number of RX descriptors available for the queue */
+	struct rte_eth_rxconf rx_conf;
+	/**< Copy of RX configuration structure for queue */
+	struct rte_mempool *mb_pool;
+	/**< Reference to mbuf pool to use for RX queue */
+
 	rte_atomic64_t rx_pkts;
+};
+
+struct tx_ring_queue {
+	struct rte_ring *rng;
+	uint8_t primary_id;
+	uint8_t secondary_id;
+
+	uint16_t nb_tx_desc;
+	/**< Number of TX descriptors available for the queue */
+	struct rte_eth_txconf tx_conf;
+	/**< Copy of TX configuration structure for queue */
+
 	rte_atomic64_t tx_pkts;
 	rte_atomic64_t err_pkts;
 };
+
 
 struct pmd_internals {
 	unsigned nb_rx_queues;
 	unsigned nb_tx_queues;
 
-	struct ring_queue rx_ring_queues[RTE_PMD_RING_MAX_RX_RINGS];
-	struct ring_queue tx_ring_queues[RTE_PMD_RING_MAX_TX_RINGS];
+	struct rx_ring_queue rx_ring_queues[RTE_PMD_RING_MAX_RX_RINGS];
+	struct tx_ring_queue tx_ring_queues[RTE_PMD_RING_MAX_TX_RINGS];
 
 	struct ether_addr address;
 };
@@ -76,11 +99,20 @@ static struct rte_eth_link pmd_link = {
 		.link_status = 0
 };
 
+static void
+close_secondary(uint8_t port_id)
+{
+	char name[50];
+	rte_eth_dev_stop(port_id);
+	rte_eth_dev_close(port_id);
+	rte_eth_dev_detach(port_id, name);
+}
+
 static uint16_t
 eth_ring_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	void **ptrs = (void *)&bufs[0];
-	struct ring_queue *r = q;
+	struct rx_ring_queue *r = q;
 	const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r->rng,
 			ptrs, nb_bufs);
 	if (r->rng->flags & RING_F_SC_DEQ)
@@ -94,7 +126,7 @@ static uint16_t
 eth_ring_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	void **ptrs = (void *)&bufs[0];
-	struct ring_queue *r = q;
+	struct tx_ring_queue *r = q;
 	const uint16_t nb_tx = (uint16_t)rte_ring_enqueue_burst(r->rng,
 			ptrs, nb_bufs);
 	if (r->rng->flags & RING_F_SP_ENQ) {
@@ -105,6 +137,80 @@ eth_ring_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		rte_atomic64_add(&(r->err_pkts), nb_bufs - nb_tx);
 	}
 	return nb_tx;
+}
+
+/*
+ * this function sends the packets using the secondary configured port
+ */
+static uint16_t
+eth_ring_tx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct tx_ring_queue *r = q;
+	const uint16_t nb_tx = rte_eth_tx_burst(r->secondary_id, 0, bufs, nb_bufs);
+
+	r->tx_pkts.cnt += nb_tx;
+	r->err_pkts.cnt += nb_bufs - nb_tx;
+
+	return nb_tx;
+}
+
+/*
+ * this function reads packets from both links, the principal one and the
+ * auxiliar one
+ */
+static uint16_t
+eth_ring_rx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct rx_ring_queue *r = q;
+
+	/* In the case there are packets in the auxiliar link */
+	if (unlikely(rte_ring_count(r->rng))) {
+		return eth_ring_rx(q, bufs, nb_bufs);
+	}
+
+	const uint16_t nb_rx = rte_eth_rx_burst(r->secondary_id, 0, bufs, nb_bufs);
+
+	r->rx_pkts.cnt += nb_rx;
+
+	return nb_rx;
+}
+
+/*
+ * these are small wrappers that close the old device before sending over the
+ * new one
+ */
+static uint16_t
+eth_ring_tx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct rx_ring_queue * tx_q = q;
+	struct rte_eth_dev * primary_port;
+
+	primary_port = &rte_eth_devices[tx_q->primary_id];
+
+	/* now, the devices behaves in the standard way */
+	primary_port->rx_pkt_burst = eth_ring_rx;
+	primary_port->tx_pkt_burst = eth_ring_tx;
+
+	close_secondary(tx_q->secondary_id);
+
+	return eth_ring_tx(q, bufs, nb_bufs);
+}
+
+static uint16_t
+eth_ring_rx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct rx_ring_queue * rx_q = q;
+	struct rte_eth_dev * primary_port;
+
+	primary_port = &rte_eth_devices[rx_q->primary_id];
+
+	/* now, the devices behaves in the standard way */
+	primary_port->rx_pkt_burst = eth_ring_rx;
+	primary_port->tx_pkt_burst = eth_ring_tx;
+
+	close_secondary(rx_q->secondary_id);
+
+	return eth_ring_rx(q, bufs, nb_bufs);
 }
 
 static int
@@ -139,24 +245,40 @@ eth_dev_set_link_up(struct rte_eth_dev *dev)
 
 static int
 eth_rx_queue_setup(struct rte_eth_dev *dev,uint16_t rx_queue_id,
-				    uint16_t nb_rx_desc __rte_unused,
+				    uint16_t nb_rx_desc,
 				    unsigned int socket_id __rte_unused,
-				    const struct rte_eth_rxconf *rx_conf __rte_unused,
-				    struct rte_mempool *mb_pool __rte_unused)
+				    const struct rte_eth_rxconf *rx_conf,
+				    struct rte_mempool *mb_pool)
 {
 	struct pmd_internals *internals = dev->data->dev_private;
 	dev->data->rx_queues[rx_queue_id] = &internals->rx_ring_queues[rx_queue_id];
+
+	/* save config to be used in secondary device when required */
+	internals->rx_ring_queues[rx_queue_id].nb_rx_desc = nb_rx_desc;
+
+	memcpy(&internals->rx_ring_queues[rx_queue_id].rx_conf, rx_conf,
+			 sizeof(*rx_conf));
+
+	internals->rx_ring_queues[rx_queue_id].mb_pool = mb_pool;
+
 	return 0;
 }
 
 static int
 eth_tx_queue_setup(struct rte_eth_dev *dev, uint16_t tx_queue_id,
-				    uint16_t nb_tx_desc __rte_unused,
+				    uint16_t nb_tx_desc,
 				    unsigned int socket_id __rte_unused,
-				    const struct rte_eth_txconf *tx_conf __rte_unused)
+				    const struct rte_eth_txconf *tx_conf)
 {
 	struct pmd_internals *internals = dev->data->dev_private;
 	dev->data->tx_queues[tx_queue_id] = &internals->tx_ring_queues[tx_queue_id];
+
+	/* save config to be used in secondary device when required */
+	internals->tx_ring_queues[tx_queue_id].nb_tx_desc = nb_tx_desc;
+
+	memcpy(&internals->tx_ring_queues[tx_queue_id].tx_conf, tx_conf,
+			 sizeof(*tx_conf));
+
 	return 0;
 }
 
@@ -378,6 +500,99 @@ rte_eth_from_ring(struct rte_ring *r)
 {
 	return rte_eth_from_rings(r->name, &r, 1, &r, 1,
 			r->memzone ? r->memzone->socket_id : SOCKET_ID_ANY);
+}
+
+int rte_eth_ring_add_secondary_device(uint8_t primary_id, uint8_t secondary_id)
+{
+	struct rte_eth_dev * primary_port;
+
+	struct rx_ring_queue * rx_q;
+	struct tx_ring_queue * tx_q;
+	int errval;
+
+	if (!rte_eth_dev_is_valid_port(primary_id)) {
+		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", primary_id);
+		return -1;
+	}
+
+	if (!rte_eth_dev_is_valid_port(secondary_id)) {
+		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", secondary_id);
+		return -1;
+	}
+
+	rte_eth_dev_stop(secondary_id);
+
+	primary_port = &rte_eth_devices[primary_id];
+
+	/* Setup device */
+	/* TODO: multiqueue support  */
+	errval = rte_eth_dev_configure(secondary_id, 1, 1,
+			  &(primary_port->data->dev_conf));
+	if (errval != 0) {
+		RTE_LOG(ERR, PMD, "Cannot configure slave device: port %u , err (%d)",
+				secondary_id, errval);
+		return errval;
+	}
+
+	/* Setup Rx Queues */
+	rx_q = (struct rx_ring_queue *)primary_port->data->rx_queues[0];
+	errval = rte_eth_rx_queue_setup(secondary_id, 0,
+				rx_q->nb_rx_desc,
+				rte_eth_dev_socket_id(secondary_id),
+				&(rx_q->rx_conf), rx_q->mb_pool);
+	if (errval != 0) {
+		RTE_LOG(ERR, PMD, "rte_eth_rx_queue_setup: port=%d queue_id %d, err (%d)",
+			secondary_id, 0, errval);
+		return errval;
+	}
+
+	rx_q->secondary_id = secondary_id;
+
+	/* Setup Tx Queues */
+	tx_q = (struct tx_ring_queue *)primary_port->data->tx_queues[0];
+	errval = rte_eth_tx_queue_setup(secondary_id, 0,
+				tx_q->nb_tx_desc,
+				rte_eth_dev_socket_id(secondary_id),
+				&tx_q->tx_conf);
+	if (errval != 0) {
+		RTE_LOG(ERR, PMD, "rte_eth_tx_queue_setup: port=%d queue_id %d, err (%d)",
+				secondary_id, 0, errval);
+		return errval;
+	}
+
+	tx_q->secondary_id = secondary_id;
+
+	/* Start device */
+	errval = rte_eth_dev_start(secondary_id);
+	if (errval != 0) {
+		RTE_LOG(ERR, PMD, "rte_eth_dev_start: port=%u, err (%d)",
+				secondary_id, errval);
+		return -1;
+	}
+
+	/* now the port behaves in a special way */
+	primary_port->rx_pkt_burst = eth_ring_rx_secondary;
+	primary_port->tx_pkt_burst = eth_ring_tx_secondary;
+
+	return 0;
+}
+
+int rte_eth_ring_remove_secondary_device(uint8_t primary_id)
+{
+	struct rte_eth_dev * primary_port;
+
+	if (!rte_eth_dev_is_valid_port(primary_id)) {
+		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", primary_id);
+		return -1;
+	}
+
+	primary_port = &rte_eth_devices[primary_id];
+
+	/* when called, close the secondary device */
+	primary_port->rx_pkt_burst = eth_ring_rx_close;
+	primary_port->tx_pkt_burst = eth_ring_tx_close;
+
+	return 0;
 }
 
 enum dev_action{
