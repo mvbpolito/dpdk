@@ -20,14 +20,22 @@ process_host_request(char * buf, size_t len)
 {
 	(void) len;
 	//printf("*** '%s' *****\n", buf);
-
+	char action[20];
 	char p_old[RTE_ETH_NAME_MAX_LEN] = {0};
 	char p_new[RTE_ETH_NAME_MAX_LEN] = {0};
 
-	sscanf(strtok(buf, ","), "old=%s", p_old);
-	sscanf(strtok(NULL, ","), "new=%s", p_new);
+	sscanf(strtok(buf, ","), "action=%s", action);
 
-	rte_eth_change_device(p_old, p_new);
+	if (!strcmp(action, "add")) {
+		sscanf(strtok(NULL, ","), "old=%s", p_old);
+		sscanf(strtok(NULL, ","), "new=%s", p_new);
+		rte_eth_add_slave_to_ring(p_old, p_new);
+	} else if (!strcmp(action, "del")) {
+		sscanf(strtok(NULL, ","), "old=%s", p_old);
+		rte_eth_remove_slave_from_ring(p_old);
+	} else {
+		RTE_LOG(ERR, EAL, "Bad action received\n");
+	}
 }
 
 static void
