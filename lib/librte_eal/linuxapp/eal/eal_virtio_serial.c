@@ -20,7 +20,7 @@ process_host_request(char * buf, size_t len)
 {
 	(void) len;
 	//printf("*** '%s' *****\n", buf);
-	char action[20];
+	char action[20] = {0};
 	char p_old[RTE_ETH_NAME_MAX_LEN] = {0};
 	char p_new[RTE_ETH_NAME_MAX_LEN] = {0};
 
@@ -44,7 +44,18 @@ rte_virtio_serial_sigio_handler(int signal)
 	(void) signal;
 
 	int ret;
-	char buf[512];
+	char buf[512] = {0};
+
+	sigset_t mask;
+	sigset_t orig_mask;
+
+	sigemptyset (&mask);
+	sigaddset (&mask, SIGIO);
+
+	if (sigprocmask(SIG_BLOCK, &mask, &orig_mask) < 0) {
+			RTE_LOG(ERR, EAL, "Cannot sigprocmask");
+			return;
+	}
 
 	/* is there any data? */
 	do {
@@ -63,6 +74,12 @@ rte_virtio_serial_sigio_handler(int signal)
 	}
 
 	process_host_request(buf, ret);
+
+	if (sigprocmask(SIG_SETMASK, &orig_mask, NULL) < 0) {
+			RTE_LOG(ERR, EAL, "Cannot sigprocmask");
+			return;
+	}
+
 }
 
 int rte_eal_virtio_init(void)
