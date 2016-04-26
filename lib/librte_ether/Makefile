@@ -38,6 +38,7 @@ LIB = libethdev.a
 
 CFLAGS += -O3
 CFLAGS += $(WERROR_FLAGS)
+CFLAGS += -I$(RTE_SDK)/drivers/net/ring
 
 EXPORT_MAP := rte_ether_version.map
 
@@ -54,6 +55,6 @@ SYMLINK-y-include += rte_eth_ctrl.h
 SYMLINK-y-include += rte_dev_info.h
 
 # this lib depends upon:
-DEPDIRS-y += lib/librte_eal lib/librte_mempool lib/librte_ring lib/librte_mbuf
+DEPDIRS-y += lib/librte_eal lib/librte_mempool lib/librte_ring lib/librte_mbuf drivers/net/ring/
 
 include $(RTE_SDK)/mk/rte.lib.mk
