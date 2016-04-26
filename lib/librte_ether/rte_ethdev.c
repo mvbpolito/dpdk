@@ -66,6 +66,8 @@
 #include <rte_spinlock.h>
 #include <rte_string_fns.h>
 
+#include <rte_eth_ring.h>
+
 #include "rte_ether.h"
 #include "rte_ethdev.h"
 
@@ -3238,4 +3240,48 @@ rte_eth_copy_pci_info(struct rte_eth_dev *eth_dev, struct rte_pci_device *pci_de
 	eth_dev->data->kdrv = pci_dev->kdrv;
 	eth_dev->data->numa_node = pci_dev->numa_node;
 	eth_dev->data->drv_name = pci_dev->driver->name;
+}
+
+int
+rte_eth_add_slave_to_ring(const char * old, const char * new)
+{
+	uint8_t old_portid, new_portid;
+	int ret;
+
+	RTE_LOG(ERR, EAL, "rte_eth: adding slave '%s' to port '%s'\n",
+		old, new);
+
+	/* does the old port exist? */
+	ret = rte_eth_dev_get_port_by_name(old, &old_portid);
+	if (ret < 0) {
+		RTE_PMD_DEBUG_TRACE("port '%s' not found\n" , old);
+		return -1;
+	}
+
+	/* try to attach to new port */
+	ret = rte_eth_dev_attach(new, &new_portid);
+	if(ret < 0) {
+		RTE_PMD_DEBUG_TRACE("Failed to attach '%s'\n" , new);
+		return -1;
+	}
+
+	return rte_eth_ring_add_secondary_device(old_portid, new_portid);
+}
+
+int
+rte_eth_remove_slave_from_ring(const char * id)
+{
+	uint8_t old_portid;
+	int ret;
+
+	RTE_LOG(ERR, EAL, "rte_eth: removing slave in port '%s'\n", id);
+
+	/* does the old port exist? */
+	ret = rte_eth_dev_get_port_by_name(id, &old_portid);
+	if (ret < 0) {
+		RTE_PMD_DEBUG_TRACE("port '%s' not found\n" , id);
+		return -1;
+	}
+
+	return rte_eth_ring_remove_secondary_device(old_portid);
 }
