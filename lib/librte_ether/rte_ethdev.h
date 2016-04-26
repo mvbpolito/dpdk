@@ -1623,7 +1623,6 @@ struct rte_eth_dev_data {
  * is configured at compile-time in the <rte_ethdev.c> file.
  */
 extern struct rte_eth_dev rte_eth_devices[];
-extern int devices_map[];
 
 /**
  * Get the total number of Ethernet devices that have been successfully
@@ -2411,13 +2410,6 @@ extern int rte_eth_dev_get_vlan_offload(uint8_t port_id);
  */
 extern int rte_eth_dev_set_vlan_pvid(uint8_t port_id, uint16_t pvid, int on);
 
-static inline struct rte_eth_dev *
-get_mapped_port(uint8_t port_id)
-{
-	/* XXX: error control */
-	return &rte_eth_devices[devices_map[port_id]];
-}
-
 /**
  *
  * Retrieve a burst of input packets from a receive queue of an Ethernet
@@ -2504,7 +2496,7 @@ static inline uint16_t
 rte_eth_rx_burst(uint8_t port_id, uint16_t queue_id,
 		 struct rte_mbuf **rx_pkts, const uint16_t nb_pkts)
 {
-	struct rte_eth_dev *dev = get_mapped_port(port_id);
+	struct rte_eth_dev *dev = &rte_eth_devices[port_id];
 
 #ifdef RTE_LIBRTE_ETHDEV_DEBUG
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, 0);
@@ -2548,7 +2540,7 @@ rte_eth_rx_burst(uint8_t port_id, uint16_t queue_id,
 static inline int
 rte_eth_rx_queue_count(uint8_t port_id, uint16_t queue_id)
 {
-	struct rte_eth_dev *dev = get_mapped_port(port_id);
+	struct rte_eth_dev *dev = &rte_eth_devices[port_id];
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, -EINVAL);
 	RTE_FUNC_PTR_OR_ERR_RET(*dev->dev_ops->rx_queue_count, -ENOTSUP);
         return (*dev->dev_ops->rx_queue_count)(dev, queue_id);
@@ -2572,7 +2564,7 @@ rte_eth_rx_queue_count(uint8_t port_id, uint16_t queue_id)
 static inline int
 rte_eth_rx_descriptor_done(uint8_t port_id, uint16_t queue_id, uint16_t offset)
 {
-	struct rte_eth_dev *dev = get_mapped_port(port_id);
+	struct rte_eth_dev *dev = &rte_eth_devices[port_id];
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
 	RTE_FUNC_PTR_OR_ERR_RET(*dev->dev_ops->rx_descriptor_done, -ENOTSUP);
 	return (*dev->dev_ops->rx_descriptor_done)( \
@@ -2641,7 +2633,7 @@ static inline uint16_t
 rte_eth_tx_burst(uint8_t port_id, uint16_t queue_id,
 		 struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 {
-	struct rte_eth_dev *dev = get_mapped_port(port_id);
+	struct rte_eth_dev *dev = &rte_eth_devices[port_id];
 
 #ifdef RTE_LIBRTE_ETHDEV_DEBUG
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, 0);
@@ -3894,8 +3886,6 @@ const struct rte_memzone *
 rte_eth_dma_zone_reserve(const struct rte_eth_dev *eth_dev, const char *name,
 			 uint16_t queue_id, size_t size,
 			 unsigned align, int socket_id);
-
-int rte_eth_change_device(const char * old, const char * new);
 
 #ifdef __cplusplus
 }

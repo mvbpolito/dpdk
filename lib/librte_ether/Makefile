@@ -56,7 +56,4 @@ SYMLINK-y-include += rte_dev_info.h
 # this lib depends upon:
 DEPDIRS-y += lib/librte_eal lib/librte_mempool lib/librte_ring lib/librte_mbuf
 
-# this lib needs rte_ethdev
-DEPDIRS-$(CONFIG_RTE_LIBRTE_IVSHMEM) += lib/librte_ivshmem
-
 include $(RTE_SDK)/mk/rte.lib.mk
