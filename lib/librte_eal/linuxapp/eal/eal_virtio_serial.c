@@ -65,13 +65,19 @@ rte_virtio_serial_sigio_handler(int signal)
 	if (ret == -1)
 		return;
 
-	ret = read(pollfds.fd, buf, sizeof(buf));
-	if(ret == -1)
-	{
-		/* I think logging from an interrupt is not safe */
-		RTE_LOG(ERR, EAL, "Failed to read from device\n");
-		return;
-	}
+	char * buf_ptr = &buf[0];
+	do {
+		ret = read(pollfds.fd, buf, sizeof(buf));
+		if(ret == -1)
+		{
+			/* I think logging from an interrupt is not safe */
+			RTE_LOG(ERR, EAL, "Failed to read from device\n");
+			return;
+		}
+
+		buf_ptr += ret;
+
+	} while(ret != 0);
 
 	process_host_request(buf, ret);
 
