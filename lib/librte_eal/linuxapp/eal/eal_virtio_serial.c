@@ -15,27 +15,94 @@
 
 struct pollfd pollfds;
 
-static void
+static ssize_t safewrite(int fd, const char *buf, size_t count, int eagain_ret)
+{
+	ssize_t ret, len;
+	int flags;
+	int nonblock;
+
+	nonblock = 0;
+	flags = fcntl(fd, F_GETFL);
+	if (flags > 0 && flags & O_NONBLOCK)
+		nonblock = 1;
+
+	len = count;
+	while (len > 0) {
+		ret = write(fd, buf, len);
+		if (ret == -1) {
+			if (errno == EINTR)
+				continue;
+
+			if (errno == EAGAIN) {
+				if (nonblock && eagain_ret) {
+					return -EAGAIN;
+				} else {
+					continue;
+				}
+			}
+			return -errno;
+		} else if (ret == 0) {
+			break;
+		} else {
+			buf += ret;
+			len -= ret;
+		}
+	}
+	return count - len;
+}
+
+static int
 process_host_request(char * buf, size_t len)
 {
-	(void) len;
-	//printf("*** '%s' *****\n", buf);
 	char action[20] = {0};
 	char p_old[RTE_ETH_NAME_MAX_LEN] = {0};
 	char p_new[RTE_ETH_NAME_MAX_LEN] = {0};
+	int err;
+	char * str;
+	if (len <= 0)
+		return -1;
 
-	sscanf(strtok(buf, ","), "action=%s", action);
+	str = strtok(buf, ",");
+	if (str == NULL)
+		goto error;
+
+	err = sscanf(str, "action=%s", action);
+	if (err != 1)
+		goto error;
 
 	if (!strcmp(action, "add")) {
-		sscanf(strtok(NULL, ","), "old=%s", p_old);
-		sscanf(strtok(NULL, ","), "new=%s", p_new);
-		rte_eth_add_slave_to_ring(p_old, p_new);
+		str = strtok(NULL, ",");
+		if (str == NULL)
+			goto error;
+
+		err = sscanf(str, "old=%s", p_old);
+		if (err != 1)
+			goto error;
+
+		err = sscanf(strtok(NULL, ","), "new=%s", p_new);
+		if (err != 1)
+			goto error;
+		err = rte_eth_add_slave_to_ring(p_old, p_new);
+		if (err != 0)
+			goto error;
 	} else if (!strcmp(action, "del")) {
-		sscanf(strtok(NULL, ","), "old=%s", p_old);
-		rte_eth_remove_slave_from_ring(p_old);
+		str = strtok(NULL, ",");
+		err = sscanf(str, "old=%s", p_old);
+		if (err != 1)
+			goto error;
+		err = rte_eth_remove_slave_from_ring(p_old);
+		if (err != 0)
+			goto error;
 	} else {
 		RTE_LOG(ERR, EAL, "Bad action received\n");
+		goto error;
 	}
+
+	return 0;
+
+error:
+	RTE_LOG(ERR, EAL, "process_host_request error\n");
+	return -1;
 }
 
 static void
@@ -57,30 +124,37 @@ rte_virtio_serial_sigio_handler(int signal)
 			return;
 	}
 
-	/* is there any data? */
-	do {
-		ret = poll(&pollfds, 1, 0);
-	} while (ret == -1 && errno == EINTR);
-
-	if (ret == -1)
-		return;
-
 	char * buf_ptr = &buf[0];
+	int n = 0;
 	do {
 		ret = read(pollfds.fd, buf, sizeof(buf));
-		if(ret == -1)
-		{
+		if (ret == -1) {
 			/* I think logging from an interrupt is not safe */
 			RTE_LOG(ERR, EAL, "Failed to read from device\n");
 			return;
 		}
 
 		buf_ptr += ret;
+		n += ret;
 
 	} while(ret != 0);
 
-	process_host_request(buf, ret);
-
+	if (n > 0) {
+		ret = process_host_request(buf, n);
+		if (ret == 0) {
+			char ok[] = "OK";
+			ret = safewrite(pollfds.fd, ok, sizeof(ok), 0);
+			if(ret != sizeof(ok)) {
+				RTE_LOG(ERR, EAL, "Fail to write ok virtio-serial\n");
+			}
+		} else {
+			char nok[] = "NOK";
+			ret = safewrite(pollfds.fd, nok, sizeof(nok), 0);
+			if(ret != sizeof(nok)) {
+				RTE_LOG(ERR, EAL, "Fail to write ok virtio-serial\n");
+			}
+		}
+	}
 	if (sigprocmask(SIG_SETMASK, &orig_mask, NULL) < 0) {
 			RTE_LOG(ERR, EAL, "Cannot sigprocmask");
 			return;
@@ -96,7 +170,7 @@ int rte_eal_virtio_init(void)
 
 	/* open device and configure it as async */
 	fd = open(VIRTIO_SERIAL_PATH, O_RDWR);
-	if(fd == -1)
+	if (fd == -1)
 	{
 		RTE_LOG(ERR, EAL, "Cannot open '%s'!\n", VIRTIO_SERIAL_PATH);
 		return -1;
