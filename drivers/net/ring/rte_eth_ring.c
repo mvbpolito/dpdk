@@ -51,6 +51,8 @@ static const char *valid_arguments[] = {
 	NULL
 };
 
+/* XXX: there are some duplicated fields among these two structs */
+
 struct rx_ring_queue {
 	struct rte_ring *rng;
 	uint8_t primary_id;
@@ -89,8 +91,8 @@ struct pmd_internals {
 	struct tx_ring_queue tx_ring_queues[RTE_PMD_RING_MAX_TX_RINGS];
 
 	struct ether_addr address;
+	struct rte_ring * temp_ring;
 };
-
 
 static const char *drivername = "Rings PMD";
 static struct rte_eth_link pmd_link = {
@@ -99,15 +101,12 @@ static struct rte_eth_link pmd_link = {
 		.link_status = 0
 };
 
-static void
-close_secondary(uint8_t port_id)
-{
-	char name[50];
-	rte_eth_dev_stop(port_id);
-	rte_eth_dev_close(port_id);
-	rte_eth_dev_detach(port_id, name);
-}
+static uint16_t
+eth_ring_temp_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
 
+/*
+ * these two functions receive/send packets using only the primary device
+ */
 static uint16_t
 eth_ring_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
@@ -140,7 +139,7 @@ eth_ring_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 }
 
 /*
- * this function sends the packets using the secondary configured port
+ * this function sends packets using only the secondary configured port
  */
 static uint16_t
 eth_ring_tx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
@@ -155,14 +154,15 @@ eth_ring_tx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 }
 
 /*
- * this function reads packets from both links, the principal one and the
- * auxiliar one
+ * this function reads packets from both links, the primary one and the
+ * secondary one
  */
 static uint16_t
 eth_ring_rx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	struct rx_ring_queue *r = q;
 
+	/* XXX: in the case the read packets < nb_bufs, read remaining from secondary */
 	/* In the case there are packets in the auxiliar link */
 	if (unlikely(rte_ring_count(r->rng))) {
 		return eth_ring_rx(q, bufs, nb_bufs);
@@ -175,9 +175,41 @@ eth_ring_rx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	return nb_rx;
 }
 
+static void
+close_secondary(uint8_t primary_id, uint8_t secondary_id)
+{
+	char name[50];		/*XXX: change 50 by a propper value */
+
+	struct rte_mbuf * temp[1024];
+	uint16_t nb_rx;
+
+	struct rte_eth_dev * primary_port;
+	struct pmd_internals * internals;
+
+	primary_port = &rte_eth_devices[primary_id];
+	internals = primary_port->data->dev_private;
+
+	snprintf(name, sizeof(name), "temp%d", primary_id);
+	internals->temp_ring = rte_ring_create(name, 1024, 0, 0);
+	if(internals->temp_ring == NULL)
+		return;
+
+	/* read packets into the temp ring */
+	nb_rx = rte_eth_rx_burst(secondary_id, 0, temp, 1024);
+	rte_ring_enqueue_bulk(internals->temp_ring, (void **) temp, nb_rx);
+
+	rte_eth_dev_stop(secondary_id);
+	rte_eth_dev_close(secondary_id);
+	rte_eth_dev_detach(secondary_id, name);
+}
+
+
 /*
- * these are small wrappers that close the old device before sending over the
- * new one
+ * these functions are a quite special, they:
+ * - copy packets from the secondary device to a temp ring
+ * - closes the secondary device
+ * - tx function is assigned to the standard one
+ * - rx function is assigned to eth_ring_temp_rx
  */
 static uint16_t
 eth_ring_tx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
@@ -188,10 +220,10 @@ eth_ring_tx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	primary_port = &rte_eth_devices[tx_q->primary_id];
 
 	/* now, the devices behaves in the standard way */
-	primary_port->rx_pkt_burst = eth_ring_rx;
+	primary_port->rx_pkt_burst = eth_ring_temp_rx;
 	primary_port->tx_pkt_burst = eth_ring_tx;
 
-	close_secondary(tx_q->secondary_id);
+	close_secondary(tx_q->primary_id, tx_q->secondary_id);
 
 	return eth_ring_tx(q, bufs, nb_bufs);
 }
@@ -208,7 +240,44 @@ eth_ring_rx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	primary_port->rx_pkt_burst = eth_ring_rx;
 	primary_port->tx_pkt_burst = eth_ring_tx;
 
-	close_secondary(rx_q->secondary_id);
+	close_secondary(rx_q->primary_id, rx_q->secondary_id);
+
+	return eth_ring_rx(q, bufs, nb_bufs);
+}
+
+/* this function reads packets from the temp ring until it gets empty, then that
+ * happens the device starts reading the primary port
+ */
+static uint16_t
+eth_ring_temp_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct rx_ring_queue * rx_q = q;
+	struct rte_eth_dev * primary_port;
+	struct rte_ring * r;
+	struct pmd_internals * internals;
+
+	void **ptrs = (void *)&bufs[0];
+
+	primary_port = &rte_eth_devices[rx_q->primary_id];
+	internals = primary_port->data->dev_private;
+	r = internals->temp_ring;
+
+	/* are there packets in the temporal ring? */
+	if (rte_ring_count(r)) {
+		const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r,
+			ptrs, nb_bufs);
+
+		rx_q->rx_pkts.cnt += nb_rx;
+
+		return nb_rx;
+	}
+
+	rte_ring_free(r);
+
+	/* now, there are not more packets in the temporal ring, then the device
+	 * behaves in the standard way
+	 */
+	primary_port->rx_pkt_burst = eth_ring_rx;
 
 	return eth_ring_rx(q, bufs, nb_bufs);
 }
