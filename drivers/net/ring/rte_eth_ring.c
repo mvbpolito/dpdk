@@ -33,7 +33,6 @@
 
 #include "rte_eth_ring.h"
 #include <rte_mbuf.h>
-#include <rte_ethdev.h>
 #include <rte_malloc.h>
 #include <rte_memcpy.h>
 #include <rte_memzone.h>
@@ -41,6 +40,10 @@
 #include <rte_dev.h>
 #include <rte_kvargs.h>
 #include <rte_errno.h>
+#include <rte_ivshmem.h>
+
+/* Following code probably only works with Linux */
+#include <unistd.h>
 
 #define ETH_RING_NUMA_NODE_ACTION_ARG	"nodeaction"
 #define ETH_RING_ACTION_CREATE		"CREATE"
@@ -51,49 +54,6 @@ static const char *valid_arguments[] = {
 	NULL
 };
 
-/* XXX: there are some duplicated fields among these two structs */
-
-struct rx_ring_queue {
-	struct rte_ring *rng;
-	uint8_t primary_id;
-	uint8_t secondary_id;
-
-	uint16_t nb_rx_desc;
-	/**< Number of RX descriptors available for the queue */
-	struct rte_eth_rxconf rx_conf;
-	/**< Copy of RX configuration structure for queue */
-	struct rte_mempool *mb_pool;
-	/**< Reference to mbuf pool to use for RX queue */
-
-	rte_atomic64_t rx_pkts;
-};
-
-struct tx_ring_queue {
-	struct rte_ring *rng;
-	uint8_t primary_id;
-	uint8_t secondary_id;
-
-	uint16_t nb_tx_desc;
-	/**< Number of TX descriptors available for the queue */
-	struct rte_eth_txconf tx_conf;
-	/**< Copy of TX configuration structure for queue */
-
-	rte_atomic64_t tx_pkts;
-	rte_atomic64_t err_pkts;
-};
-
-
-struct pmd_internals {
-	unsigned nb_rx_queues;
-	unsigned nb_tx_queues;
-
-	struct rx_ring_queue rx_ring_queues[RTE_PMD_RING_MAX_RX_RINGS];
-	struct tx_ring_queue tx_ring_queues[RTE_PMD_RING_MAX_TX_RINGS];
-
-	struct ether_addr address;
-	struct rte_ring * temp_ring;
-};
-
 static const char *drivername = "Rings PMD";
 static struct rte_eth_link pmd_link = {
 		.link_speed = 10000,
@@ -101,14 +61,127 @@ static struct rte_eth_link pmd_link = {
 		.link_status = 0
 };
 
-static uint16_t
-eth_ring_temp_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static int
+buf_is_cap(struct rte_mbuf * buf)
+{
+	if(buf->userdata == buf_is_cap)
+		return 1;
+
+	return 0;
+}
+
+/* forward declarations to avoid missing declarations */
+static uint16_t eth_ring_normal_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static uint16_t eth_ring_normal_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+
+static uint16_t eth_ring_bypass_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static uint16_t eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+
+static uint16_t eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static uint16_t eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+
+static uint16_t eth_ring_send_cap_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static uint16_t eth_ring_send_cap_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+
+
+/*
+ * send a cap (special buffer that indicates that is the last)
+ */
+static void
+send_cap_normal(void *q)
+{
+	struct tx_ring_queue *tx_q = q;
+
+	if (rte_spinlock_trylock(&tx_q->send_cap_lock) == 0)
+		return;
+
+	/* has a cap been already sent?*/
+	if(tx_q->cap_sent) {
+		rte_spinlock_unlock(&tx_q->send_cap_lock);
+		return;
+	}
+
+	tx_q->cap_sent = 1;
+
+	/* A horrible method to lock for the memory pool */
+	struct rte_eth_dev * normal_port =
+		normal_port = &rte_eth_devices[tx_q->normal_id];
+	const struct pmd_internals *internal = normal_port->data->dev_private;
+	struct rte_mempool *mb_pool = internal->rx_ring_queues[0].mb_pool;
+
+	struct rte_mbuf *caps[5] = {0};
+
+	int ret, i, ntosend;
+	do {
+		ret = rte_mempool_get_bulk(mb_pool, (void **) caps, 5);
+	} while(ret != 0);
+
+	/* it is the way to detect if the packets is an cap.
+	 * The userdata filed is fill with a particular memory adress, in this case
+	 * buf_is_cap
+	 */
+	for (i = 0; i < 5; i++)
+		caps[i]->userdata = buf_is_cap;
+
+	ntosend = 5;
+	i = 0;
+	do {
+		i += eth_ring_normal_tx(q, caps, ntosend - i);
+	} while(i < ntosend);
+
+	rte_spinlock_unlock(&tx_q->send_cap_lock);
+}
+
+static void
+send_cap_bypass(void *q)
+{
+	struct tx_ring_queue *tx_q = q;
+
+	if (rte_spinlock_trylock(&tx_q->send_cap_lock) == 0)
+		return;
+
+	/* has a cap been already sent?*/
+	if(tx_q->cap_sent) {
+		rte_spinlock_unlock(&tx_q->send_cap_lock);
+		return;
+	}
+
+	tx_q->cap_sent = 1;
+
+	/* A horrible method to lock for the memory pool */
+	struct rte_eth_dev * normal_port =
+		normal_port = &rte_eth_devices[tx_q->normal_id];
+	const struct pmd_internals *internal = normal_port->data->dev_private;
+	struct rte_mempool *mb_pool = internal->rx_ring_queues[0].mb_pool;
+
+	struct rte_mbuf *caps[5] = {0};
+
+	int ret, i, ntosend;
+	do {
+		ret = rte_mempool_get_bulk(mb_pool, (void **) caps, 5);
+	} while(ret != 0);
+
+	/* it is the way to detect if the packets is an cap.
+	 * The userdata filed is fill with a particular memory adress, in this case
+	 * buf_is_cap
+	 */
+	for (i = 0; i < 5; i++)
+		caps[i]->userdata = buf_is_cap;
+
+	ntosend = 5;
+	i = 0;
+	do {
+		i += eth_ring_bypass_tx(q, caps, ntosend - i);
+	} while(i < ntosend);
+
+	rte_spinlock_unlock(&tx_q->send_cap_lock);
+}
 
 /*
  * these two functions receive/send packets using only the primary device
  */
 static uint16_t
-eth_ring_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+eth_ring_normal_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	void **ptrs = (void *)&bufs[0];
 	struct rx_ring_queue *r = q;
@@ -122,7 +195,7 @@ eth_ring_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 }
 
 static uint16_t
-eth_ring_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+eth_ring_normal_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	void **ptrs = (void *)&bufs[0];
 	struct tx_ring_queue *r = q;
@@ -142,10 +215,10 @@ eth_ring_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
  * this function sends packets using only the secondary configured port
  */
 static uint16_t
-eth_ring_tx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+eth_ring_bypass_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	struct tx_ring_queue *r = q;
-	const uint16_t nb_tx = rte_eth_tx_burst(r->secondary_id, 0, bufs, nb_bufs);
+	const uint16_t nb_tx = rte_eth_tx_burst(r->bypass_id, 0, bufs, nb_bufs);
 
 	r->tx_pkts.cnt += nb_tx;
 	r->err_pkts.cnt += nb_bufs - nb_tx;
@@ -158,128 +231,285 @@ eth_ring_tx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
  * secondary one
  */
 static uint16_t
-eth_ring_rx_secondary(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	struct rx_ring_queue *r = q;
 
 	/* XXX: in the case the read packets < nb_bufs, read remaining from secondary */
 	/* In the case there are packets in the auxiliar link */
 	if (unlikely(rte_ring_count(r->rng))) {
-		return eth_ring_rx(q, bufs, nb_bufs);
+		return eth_ring_normal_rx(q, bufs, nb_bufs);
 	}
 
-	const uint16_t nb_rx = rte_eth_rx_burst(r->secondary_id, 0, bufs, nb_bufs);
+	const uint16_t nb_rx = rte_eth_rx_burst(r->bypass_id, 0, bufs, nb_bufs);
 
 	r->rx_pkts.cnt += nb_rx;
 
 	return nb_rx;
 }
 
-static void
-close_secondary(uint8_t primary_id, uint8_t secondary_id)
-{
-	char name[50];		/*XXX: change 50 by a propper value */
+//static void
+//close_secondary(uint8_t normal_id, uint8_t bypass_id)
+//{
+//	char name[50];		/*XXX: change 50 by a propper value */
+//
+//	struct rte_mbuf * temp[1024];
+//	uint16_t nb_rx;
+//
+//	struct rte_eth_dev * normal_port;
+//	struct pmd_internals * internals;
+//
+//	normal_port = &rte_eth_devices[normal_id];
+//	internals = normal_port->data->dev_private;
+//
+//	snprintf(name, sizeof(name), "temp%d", normal_id);
+//	internals->temp_ring = rte_ring_create(name, 1024, 0, 0);
+//	if(internals->temp_ring == NULL)
+//		return;
+//
+//	/* read packets into the temp ring */
+//	nb_rx = rte_eth_rx_burst(bypass_id, 0, temp, 1024);
+//	rte_ring_enqueue_bulk(internals->temp_ring, (void **) temp, nb_rx);
+//
+//	rte_eth_dev_stop(bypass_id);
+//	rte_eth_dev_close(bypass_id);
+//	rte_eth_dev_detach(bypass_id, name);
+//}
 
-	struct rte_mbuf * temp[1024];
-	uint16_t nb_rx;
+//static uint16_t
+//eth_ring_tx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+//{
+//	struct rx_ring_queue * tx_q = q;
+//	struct rte_eth_dev * normal_port;
+//
+//	normal_port = &rte_eth_devices[tx_q->normal_id];
+//
+//	/* now, the devices behaves in the standard way */
+//	normal_port->rx_pkt_burst = eth_ring_temp_rx;
+//	normal_port->tx_pkt_burst = eth_ring_normal_tx;
+//
+//	close_secondary(tx_q->normal_id, tx_q->bypass_id);
+//
+//	return eth_ring_normal_tx(q, bufs, nb_bufs);
+//}
+//
+//static uint16_t
+//eth_ring_rx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+//{
+//	struct rx_ring_queue * rx_q = q;
+//	struct rte_eth_dev * normal_port;
+//
+//	normal_port = &rte_eth_devices[rx_q->normal_id];
+//
+//	/* now, the devices behaves in the standard way */
+//	normal_port->rx_pkt_burst = eth_ring_temp_rx;
+//	normal_port->tx_pkt_burst = eth_ring_normal_tx;
+//
+//	close_secondary(rx_q->normal_id, rx_q->bypass_id);
+//
+//	return eth_ring_normal_rx(q, bufs, nb_bufs);
+//}
 
-	struct rte_eth_dev * primary_port;
-	struct pmd_internals * internals;
 
-	primary_port = &rte_eth_devices[primary_id];
-	internals = primary_port->data->dev_private;
-
-	snprintf(name, sizeof(name), "temp%d", primary_id);
-	internals->temp_ring = rte_ring_create(name, 1024, 0, 0);
-	if(internals->temp_ring == NULL)
-		return;
-
-	/* read packets into the temp ring */
-	nb_rx = rte_eth_rx_burst(secondary_id, 0, temp, 1024);
-	rte_ring_enqueue_bulk(internals->temp_ring, (void **) temp, nb_rx);
-
-	rte_eth_dev_stop(secondary_id);
-	rte_eth_dev_close(secondary_id);
-	rte_eth_dev_detach(secondary_id, name);
-}
-
-
-/*
- * these functions are a quite special, they:
- * - copy packets from the secondary device to a temp ring
- * - closes the secondary device
- * - tx function is assigned to the standard one
- * - rx function is assigned to eth_ring_temp_rx
- */
-static uint16_t
-eth_ring_tx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
-{
-	struct rx_ring_queue * tx_q = q;
-	struct rte_eth_dev * primary_port;
-
-	primary_port = &rte_eth_devices[tx_q->primary_id];
-
-	/* now, the devices behaves in the standard way */
-	primary_port->rx_pkt_burst = eth_ring_temp_rx;
-	primary_port->tx_pkt_burst = eth_ring_tx;
-
-	close_secondary(tx_q->primary_id, tx_q->secondary_id);
-
-	return eth_ring_tx(q, bufs, nb_bufs);
-}
-
-static uint16_t
-eth_ring_rx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
-{
-	struct rx_ring_queue * rx_q = q;
-	struct rte_eth_dev * primary_port;
-
-	primary_port = &rte_eth_devices[rx_q->primary_id];
-
-	/* now, the devices behaves in the standard way */
-	primary_port->rx_pkt_burst = eth_ring_rx;
-	primary_port->tx_pkt_burst = eth_ring_tx;
-
-	close_secondary(rx_q->primary_id, rx_q->secondary_id);
-
-	return eth_ring_rx(q, bufs, nb_bufs);
-}
 
 /* this function reads packets from the temp ring until it gets empty, then that
  * happens the device starts reading the primary port
  */
+//static uint16_t
+//eth_ring_temp_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+//{
+//	struct rx_ring_queue * rx_q = q;
+//	struct rte_eth_dev * normal_port;
+//	struct rte_ring * r;
+//	struct pmd_internals * internals;
+//
+//	void **ptrs = (void *)&bufs[0];
+//
+//	normal_port = &rte_eth_devices[rx_q->normal_id];
+//	internals = normal_port->data->dev_private;
+//	r = internals->temp_ring;
+//
+//	/* are there packets in the temporal ring? */
+//	if (rte_ring_count(r)) {
+//		const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r,
+//			ptrs, nb_bufs);
+//
+//		rx_q->rx_pkts.cnt += nb_rx;
+//
+//		return nb_rx;
+//	}
+//
+//	rte_ring_free(r);
+//
+//	/* now, there are not more packets in the temporal ring, then the device
+//	 * behaves in the standard way
+//	 */
+//	normal_port->rx_pkt_burst = eth_ring_normal_rx;
+//
+//	return eth_ring_normal_rx(q, bufs, nb_bufs);
+//}
+
+/*
+ * This function is used for a limited amount of time to read packets while
+ * creating a direct path. The function does the following:
+ * - reads packets until the cap packet is found
+ * - set the "capfound" flag of the device
+ * - changes the receive function to eth_ring_bypass_rx
+ */
 static uint16_t
-eth_ring_temp_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	struct rx_ring_queue * rx_q = q;
-	struct rte_eth_dev * primary_port;
-	struct rte_ring * r;
-	struct pmd_internals * internals;
+	struct rte_eth_dev * normal_port =
+		normal_port = &rte_eth_devices[rx_q->normal_id];
+	uint16_t i;
 
-	void **ptrs = (void *)&bufs[0];
+	/* read packets in normal device */
+	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
 
-	primary_port = &rte_eth_devices[rx_q->primary_id];
-	internals = primary_port->data->dev_private;
-	r = internals->temp_ring;
-
-	/* are there packets in the temporal ring? */
-	if (rte_ring_count(r)) {
-		const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r,
-			ptrs, nb_bufs);
-
-		rx_q->rx_pkts.cnt += nb_rx;
-
-		return nb_rx;
+	for (i = 0; i < nb_rx; i++) {
+		if (buf_is_cap(bufs[i])) {
+			/*
+			 * this is very important, in the case the device is going to be
+			 * closed, send the cap in case it has not been sent
+			 */
+			send_cap_normal(normal_port->data->tx_queues[0]);
+			normal_port->rx_pkt_burst = eth_ring_bypass_rx;
+			nb_rx--;
+			break;
+		}
 	}
 
-	rte_ring_free(r);
+	rx_q->rx_pkts.cnt += nb_rx;
 
-	/* now, there are not more packets in the temporal ring, then the device
-	 * behaves in the standard way
+	return nb_rx;
+}
+
+/*
+ * This function is used for a limited amount of time to read packes while
+ * destroying a direct link. It does:
+ * - reads packets using ONLY the bypass device until cap is found
+ * - sets the "capfound" flag of the device
+ * - changes teh receive function to eth_ring_normal_rx
+ */
+static uint16_t
+eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct rx_ring_queue * rx_q = q;
+	struct rte_eth_dev * normal_port =
+		normal_port = &rte_eth_devices[rx_q->normal_id];
+	uint16_t i;
+	char name[50]; /* XXX: buf size */
+
+	/* we cannot use the eth_ring_bypass_rx here because it will also try to read
+	 * the normal device */
+	/* read packets in bypass device */
+	uint16_t nb_rx = rte_eth_rx_burst(rx_q->bypass_id, 0, bufs, nb_bufs);
+
+	rx_q->rx_pkts.cnt += nb_rx;
+
+	/*
+	 * XXX: remove the buffers that are still caps
 	 */
-	primary_port->rx_pkt_burst = eth_ring_rx;
 
-	return eth_ring_rx(q, bufs, nb_bufs);
+	for (i = 0; i < nb_rx; i++) {
+		if (buf_is_cap(bufs[i])) {
+
+			/*
+			 * this is very important, in the case the device is going to be
+			 * closed, send the cap in case it has not been sent
+			 */
+			send_cap_bypass(normal_port->data->tx_queues[0]);
+
+			normal_port->rx_pkt_burst = eth_ring_normal_rx;
+			nb_rx--;
+			rte_eth_dev_stop(rx_q->bypass_id);
+			rte_eth_dev_close(rx_q->bypass_id);
+			rte_eth_dev_detach(rx_q->bypass_id, name);
+			break;
+		}
+	}
+
+	return nb_rx;
+}
+
+/*
+ * Adding a bypass device is an async task, then it delegates sending the cap
+ * to this function. In that way it is never executed within a transmission
+ * operation
+ */
+static uint16_t
+eth_ring_send_cap_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct tx_ring_queue *rx_q = q;
+	struct rte_eth_dev * normal_port =
+		normal_port = &rte_eth_devices[rx_q->normal_id];
+	struct pmd_internals * internals = normal_port->data->dev_private;
+
+	normal_port->tx_pkt_burst = eth_ring_bypass_tx;
+
+	send_cap_normal(q);
+
+	internals->state = STATE_BYPASS;
+
+	return eth_ring_bypass_tx(q, bufs, nb_bufs);
+}
+
+static uint16_t
+eth_ring_send_cap_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct tx_ring_queue *rx_q = q;
+	struct rte_eth_dev * normal_port =
+		normal_port = &rte_eth_devices[rx_q->normal_id];
+	struct pmd_internals * internals = normal_port->data->dev_private;
+
+	normal_port->tx_pkt_burst = eth_ring_normal_tx;
+
+	send_cap_bypass(q);
+
+	internals->state = STATE_NORMAL;
+
+	return eth_ring_normal_tx(q, bufs, nb_bufs);
+}
+
+struct thread_args
+{
+	void (*func)(void *);
+	void *fargs;
+	int timeout;
+};
+
+static void *
+thread_task(void *args_)
+{
+	struct thread_args args = *((struct thread_args *) args_);
+	free(args_);
+
+	usleep(args.timeout);
+	args.func(args.fargs);
+	return NULL;
+}
+
+/*
+ * creates a thread that executes the func function in time useconds
+ */
+static int
+schedule_timeout(void (*func)(void *), void *fargs, int timeout)
+{
+	pthread_t tid;
+	pthread_attr_t attr;
+
+	struct thread_args * args = malloc(sizeof(*args));
+	args->func = func;
+	args->fargs = fargs;
+	args->timeout = timeout;
+
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+	pthread_create(&tid, &attr, thread_task,(void *)args);
+
+	return 0;
 }
 
 static int
@@ -527,6 +757,7 @@ rte_eth_from_rings(const char *name, struct rte_ring *const rx_queues[],
 	for (i = 0; i < nb_tx_queues; i++) {
 		internals->tx_ring_queues[i].rng = tx_queues[i];
 		data->tx_queues[i] = &internals->tx_ring_queues[i];
+		rte_spinlock_init(&internals->tx_ring_queues[i].send_cap_lock);
 	}
 
 	data->dev_private = internals;
@@ -547,9 +778,11 @@ rte_eth_from_rings(const char *name, struct rte_ring *const rx_queues[],
 
 	TAILQ_INIT(&(eth_dev->link_intr_cbs));
 
+	internals->state = STATE_NORMAL;
+
 	/* finally assign rx and tx ops */
-	eth_dev->rx_pkt_burst = eth_ring_rx;
-	eth_dev->tx_pkt_burst = eth_ring_tx;
+	eth_dev->rx_pkt_burst = eth_ring_normal_rx;
+	eth_dev->tx_pkt_burst = eth_ring_normal_tx;
 
 	return data->port_id;
 
@@ -565,101 +798,212 @@ error:
 }
 
 int
+rte_eth_from_ivshmem(struct rte_ivshmem_metadata_pmd_ring * pmd_ring)
+{
+	struct rte_eth_dev_data *data = NULL;
+	struct rte_eth_dev *eth_dev = NULL;
+	int numa_node = 0;	/* XXX: */
+	unsigned i;
+
+	RTE_LOG(INFO, PMD, "Ivshmem: creating rings-backed ethdev\n");
+
+	/* now do all data allocation - for eth_dev structure, dummy pci driver
+	 * and internal (private) data
+	 */
+	data = rte_zmalloc_socket(pmd_ring->name, sizeof(*data), 0, numa_node);
+	if (data == NULL) {
+		rte_errno = ENOMEM;
+		goto error;
+	}
+
+	data->rx_queues = rte_zmalloc_socket(pmd_ring->name,
+			sizeof(void *) * (pmd_ring->internals.nb_rx_queues), 0, numa_node);
+	if (data->rx_queues == NULL) {
+		rte_errno = ENOMEM;
+		goto error;
+	}
+
+	data->tx_queues = rte_zmalloc_socket(pmd_ring->name,
+			sizeof(void *) * (pmd_ring->internals.nb_tx_queues), 0, numa_node);
+	if (data->tx_queues == NULL) {
+		rte_errno = ENOMEM;
+		goto error;
+	}
+
+	/* reserve an ethdev entry */
+	eth_dev = rte_eth_dev_allocate(pmd_ring->name, RTE_ETH_DEV_VIRTUAL);
+	if (eth_dev == NULL) {
+		rte_errno = ENOSPC;
+		goto error;
+	}
+
+	/* now put it all together
+	 * - store queue data in internals,
+	 * - store numa_node info in eth_dev_data
+	 * - point eth_dev_data to internals
+	 * - and point eth_dev structure to new eth_dev_data structure
+	 */
+	/* NOTE: we'll replace the data element, of originally allocated eth_dev
+	 * so the rings are local per-process */
+
+	for (i = 0; i < pmd_ring->internals.nb_rx_queues; i++) {
+		data->rx_queues[i] = &pmd_ring->internals.rx_ring_queues[i];
+	}
+	for (i = 0; i < pmd_ring->internals.nb_tx_queues; i++) {
+		data->tx_queues[i] = &pmd_ring->internals.tx_ring_queues[i];
+		rte_spinlock_init(&pmd_ring->internals.tx_ring_queues[i].send_cap_lock);
+	}
+
+	data->dev_private = &pmd_ring->internals;
+	data->port_id = eth_dev->data->port_id;
+	memmove(data->name, eth_dev->data->name, sizeof(data->name));
+	data->nb_rx_queues = (uint16_t)pmd_ring->internals.nb_rx_queues;
+	data->nb_tx_queues = (uint16_t)pmd_ring->internals.nb_tx_queues;
+	data->dev_link = pmd_link;
+	data->mac_addrs = &pmd_ring->internals.address;
+
+	eth_dev->data = data;
+	eth_dev->driver = NULL;
+	eth_dev->dev_ops = &ops;
+	eth_dev->data->dev_flags = RTE_ETH_DEV_DETACHABLE;
+	eth_dev->data->kdrv = RTE_KDRV_NONE;
+	eth_dev->data->drv_name = drivername;
+	eth_dev->data->numa_node = numa_node;
+
+	TAILQ_INIT(&(eth_dev->link_intr_cbs));
+
+	pmd_ring->internals.state = STATE_NORMAL;
+
+	/* finally assign rx and tx ops */
+	eth_dev->rx_pkt_burst = eth_ring_normal_rx;
+	eth_dev->tx_pkt_burst = eth_ring_normal_tx;
+
+	return data->port_id;
+
+error:
+	if (data) {
+		rte_free(data->rx_queues);
+		rte_free(data->tx_queues);
+	}
+	rte_free(data);
+
+	return -1;
+}
+
+int
 rte_eth_from_ring(struct rte_ring *r)
 {
 	return rte_eth_from_rings(r->name, &r, 1, &r, 1,
 			r->memzone ? r->memzone->socket_id : SOCKET_ID_ANY);
 }
 
-int rte_eth_ring_add_secondary_device(uint8_t primary_id, uint8_t secondary_id)
+int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 {
-	struct rte_eth_dev * primary_port;
+	struct rte_eth_dev *normal_port;
 
-	struct rx_ring_queue * rx_q;
-	struct tx_ring_queue * tx_q;
+	struct rx_ring_queue *rx_q;
+	struct tx_ring_queue *tx_q;
 	int errval;
 
-	if (!rte_eth_dev_is_valid_port(primary_id)) {
-		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", primary_id);
+	if (!rte_eth_dev_is_valid_port(normal_id)) {
+		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", normal_id);
 		return -1;
 	}
 
-	if (!rte_eth_dev_is_valid_port(secondary_id)) {
-		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", secondary_id);
+	if (!rte_eth_dev_is_valid_port(bypass_id)) {
+		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", bypass_id);
 		return -1;
 	}
 
-	rte_eth_dev_stop(secondary_id);
+	rte_eth_dev_stop(bypass_id);
 
-	primary_port = &rte_eth_devices[primary_id];
+	normal_port = &rte_eth_devices[normal_id];
 
 	/* Setup device */
 	/* TODO: multiqueue support  */
-	errval = rte_eth_dev_configure(secondary_id, 1, 1,
-			  &(primary_port->data->dev_conf));
+	errval = rte_eth_dev_configure(bypass_id, 1, 1,
+			  &(normal_port->data->dev_conf));
 	if (errval != 0) {
 		RTE_LOG(ERR, PMD, "Cannot configure slave device: port %u , err (%d)",
-				secondary_id, errval);
+				bypass_id, errval);
 		return errval;
 	}
 
 	/* Setup Rx Queues */
-	rx_q = (struct rx_ring_queue *)primary_port->data->rx_queues[0];
-	errval = rte_eth_rx_queue_setup(secondary_id, 0,
+	rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
+	errval = rte_eth_rx_queue_setup(bypass_id, 0,
 				rx_q->nb_rx_desc,
-				rte_eth_dev_socket_id(secondary_id),
+				rte_eth_dev_socket_id(bypass_id),
 				&(rx_q->rx_conf), rx_q->mb_pool);
 	if (errval != 0) {
 		RTE_LOG(ERR, PMD, "rte_eth_rx_queue_setup: port=%d queue_id %d, err (%d)",
-			secondary_id, 0, errval);
+			bypass_id, 0, errval);
 		return errval;
 	}
 
-	rx_q->secondary_id = secondary_id;
+	rx_q->bypass_id = bypass_id;
 
 	/* Setup Tx Queues */
-	tx_q = (struct tx_ring_queue *)primary_port->data->tx_queues[0];
-	errval = rte_eth_tx_queue_setup(secondary_id, 0,
+	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
+	errval = rte_eth_tx_queue_setup(bypass_id, 0,
 				tx_q->nb_tx_desc,
-				rte_eth_dev_socket_id(secondary_id),
+				rte_eth_dev_socket_id(bypass_id),
 				&tx_q->tx_conf);
 	if (errval != 0) {
 		RTE_LOG(ERR, PMD, "rte_eth_tx_queue_setup: port=%d queue_id %d, err (%d)",
-				secondary_id, 0, errval);
+				bypass_id, 0, errval);
 		return errval;
 	}
 
-	tx_q->secondary_id = secondary_id;
+	tx_q->bypass_id = bypass_id;
 
 	/* Start device */
-	errval = rte_eth_dev_start(secondary_id);
+	errval = rte_eth_dev_start(bypass_id);
 	if (errval != 0) {
 		RTE_LOG(ERR, PMD, "rte_eth_dev_start: port=%u, err (%d)",
-				secondary_id, errval);
+				bypass_id, errval);
 		return -1;
 	}
 
+	tx_q->cap_sent = 0; /* no cap has been sent */
+
+	/* this is used to guarantee that a cap packet is sent.
+	 * Note that this is useful when applications are doing other things than
+	 * sending traffic
+	 */
+	schedule_timeout(send_cap_normal, tx_q, 10000);
+
 	/* now the port behaves in a special way */
-	primary_port->rx_pkt_burst = eth_ring_rx_secondary;
-	primary_port->tx_pkt_burst = eth_ring_tx_secondary;
+	normal_port->rx_pkt_burst = eth_ring_creation_rx;
+	normal_port->tx_pkt_burst = eth_ring_send_cap_creation_tx;
 
 	return 0;
 }
 
-int rte_eth_ring_remove_secondary_device(uint8_t primary_id)
+int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 {
-	struct rte_eth_dev * primary_port;
+	struct rte_eth_dev * normal_port;
+	struct tx_ring_queue *tx_q;
 
-	if (!rte_eth_dev_is_valid_port(primary_id)) {
-		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", primary_id);
+	if (!rte_eth_dev_is_valid_port(normal_id)) {
+		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", normal_id);
 		return -1;
 	}
 
-	primary_port = &rte_eth_devices[primary_id];
+	normal_port = &rte_eth_devices[normal_id];
+
+	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
+	tx_q->cap_sent = 0; /* no cap has been sent */
+
+	/* this is used to guarantee that a cap packet is sent.
+	 * Note that this is useful when applications are doing other things than
+	 * sending traffic
+	 */
+	schedule_timeout(send_cap_bypass, tx_q, 10000);
 
 	/* when called, close the secondary device */
-	primary_port->rx_pkt_burst = eth_ring_rx_close;
-	primary_port->tx_pkt_burst = eth_ring_tx_close;
+	normal_port->rx_pkt_burst = eth_ring_destruction_rx;
+	normal_port->tx_pkt_burst = eth_ring_send_cap_destruction_tx;
 
 	return 0;
 }

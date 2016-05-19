@@ -39,6 +39,64 @@ extern "C" {
 #endif
 
 #include <rte_ring.h>
+#include <rte_ethdev.h>
+#include <rte_spinlock.h>
+
+/* XXX: there are some duplicated fields among these two structs */
+
+struct rte_ivshmem_metadata_pmd_ring;
+
+struct rx_ring_queue {
+	struct rte_ring *rng;
+	uint8_t normal_id;
+	uint8_t bypass_id;
+
+	uint16_t nb_rx_desc;
+	/**< Number of RX descriptors available for the queue */
+	struct rte_eth_rxconf rx_conf;
+	/**< Copy of RX configuration structure for queue */
+	struct rte_mempool *mb_pool;
+	/**< Reference to mbuf pool to use for RX queue */
+
+	rte_atomic64_t rx_pkts;
+};
+
+struct tx_ring_queue {
+	struct rte_ring *rng;
+	struct pmd_internals * internals;
+	uint8_t normal_id;
+	uint8_t bypass_id;
+
+	uint16_t nb_tx_desc;
+	/**< Number of TX descriptors available for the queue */
+	struct rte_eth_txconf tx_conf;
+	/**< Copy of TX configuration structure for queue */
+
+	rte_spinlock_t send_cap_lock;
+	unsigned int cap_sent;	/* indicates if a cap has been sent using this queue*/
+
+	rte_atomic64_t tx_pkts;
+	rte_atomic64_t err_pkts;
+};
+
+enum {STATE_NORMAL, STATE_BYPASS, STATE_ERROR};
+
+struct pmd_internals {
+	unsigned nb_rx_queues;
+	unsigned nb_tx_queues;
+
+	struct rx_ring_queue rx_ring_queues[RTE_PMD_RING_MAX_RX_RINGS];
+	struct tx_ring_queue tx_ring_queues[RTE_PMD_RING_MAX_TX_RINGS];
+
+	unsigned int state;
+	/* how is the pmd behaving?
+	 * 0: normal mode
+	 * 1: bypass mode
+	 * 2: error
+	 */
+
+	struct ether_addr address;
+};
 
 /**
  * Create a new ethdev port from a set of rings
@@ -65,6 +123,8 @@ int rte_eth_from_rings(const char *name,
 		const unsigned nb_tx_queues,
 		const unsigned numa_node);
 
+int rte_eth_from_ivshmem(struct rte_ivshmem_metadata_pmd_ring * pmd_ring);
+
 /**
  * Create a new ethdev port from a ring
  *
@@ -79,9 +139,12 @@ int rte_eth_from_rings(const char *name,
  */
 int rte_eth_from_ring(struct rte_ring *r);
 
-int rte_eth_ring_add_secondary_device(uint8_t primary_id, uint8_t secondary_id);
+int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id);
 
-int rte_eth_ring_remove_secondary_device(uint8_t primary_id);
+int rte_eth_ring_remove_bypass_device(uint8_t normal_id);
+
+
+
 
 #ifdef __cplusplus
 }
