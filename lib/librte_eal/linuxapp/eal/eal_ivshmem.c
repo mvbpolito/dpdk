@@ -919,10 +919,7 @@ rte_eal_ivshmem_obj_init(void)
 	for(i = 0; i < ivshmem_config->pmd_rings_cnt; i++)
 	{
 		pmd_ring = &ivshmem_config->pmd_rings[i];
-		ret = rte_eth_from_rings(pmd_ring->name,
-				pmd_ring->rx_queues, pmd_ring->nb_rx_queues,
-				pmd_ring->tx_queues, pmd_ring->nb_tx_queues,
-				0);	/*XXX: what about NUMA node? */
+		rte_eth_from_ivshmem(pmd_ring);
 		if(ret == -1)
 		{
 			RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",
