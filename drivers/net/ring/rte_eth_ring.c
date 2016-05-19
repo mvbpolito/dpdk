@@ -40,7 +40,6 @@
 #include <rte_dev.h>
 #include <rte_kvargs.h>
 #include <rte_errno.h>
-#include <rte_ivshmem.h>
 
 /* Following code probably only works with Linux */
 #include <unistd.h>
@@ -798,7 +797,7 @@ error:
 }
 
 int
-rte_eth_from_ivshmem(struct rte_ivshmem_metadata_pmd_ring * pmd_ring)
+rte_eth_from_internals(char * name, struct pmd_internals * internals)
 {
 	struct rte_eth_dev_data *data = NULL;
 	struct rte_eth_dev *eth_dev = NULL;
@@ -810,28 +809,28 @@ rte_eth_from_ivshmem(struct rte_ivshmem_metadata_pmd_ring * pmd_ring)
 	/* now do all data allocation - for eth_dev structure, dummy pci driver
 	 * and internal (private) data
 	 */
-	data = rte_zmalloc_socket(pmd_ring->name, sizeof(*data), 0, numa_node);
+	data = rte_zmalloc_socket(name, sizeof(*data), 0, numa_node);
 	if (data == NULL) {
 		rte_errno = ENOMEM;
 		goto error;
 	}
 
-	data->rx_queues = rte_zmalloc_socket(pmd_ring->name,
-			sizeof(void *) * (pmd_ring->internals.nb_rx_queues), 0, numa_node);
+	data->rx_queues = rte_zmalloc_socket(name,
+			sizeof(void *) * (internals->nb_rx_queues), 0, numa_node);
 	if (data->rx_queues == NULL) {
 		rte_errno = ENOMEM;
 		goto error;
 	}
 
-	data->tx_queues = rte_zmalloc_socket(pmd_ring->name,
-			sizeof(void *) * (pmd_ring->internals.nb_tx_queues), 0, numa_node);
+	data->tx_queues = rte_zmalloc_socket(name,
+			sizeof(void *) * (internals->nb_tx_queues), 0, numa_node);
 	if (data->tx_queues == NULL) {
 		rte_errno = ENOMEM;
 		goto error;
 	}
 
 	/* reserve an ethdev entry */
-	eth_dev = rte_eth_dev_allocate(pmd_ring->name, RTE_ETH_DEV_VIRTUAL);
+	eth_dev = rte_eth_dev_allocate(name, RTE_ETH_DEV_VIRTUAL);
 	if (eth_dev == NULL) {
 		rte_errno = ENOSPC;
 		goto error;
@@ -846,21 +845,21 @@ rte_eth_from_ivshmem(struct rte_ivshmem_metadata_pmd_ring * pmd_ring)
 	/* NOTE: we'll replace the data element, of originally allocated eth_dev
 	 * so the rings are local per-process */
 
-	for (i = 0; i < pmd_ring->internals.nb_rx_queues; i++) {
-		data->rx_queues[i] = &pmd_ring->internals.rx_ring_queues[i];
+	for (i = 0; i < internals->nb_rx_queues; i++) {
+		data->rx_queues[i] = &internals->rx_ring_queues[i];
 	}
-	for (i = 0; i < pmd_ring->internals.nb_tx_queues; i++) {
-		data->tx_queues[i] = &pmd_ring->internals.tx_ring_queues[i];
-		rte_spinlock_init(&pmd_ring->internals.tx_ring_queues[i].send_cap_lock);
+	for (i = 0; i < internals->nb_tx_queues; i++) {
+		data->tx_queues[i] = &internals->tx_ring_queues[i];
+		rte_spinlock_init(&internals->tx_ring_queues[i].send_cap_lock);
 	}
 
-	data->dev_private = &pmd_ring->internals;
+	data->dev_private = internals;
 	data->port_id = eth_dev->data->port_id;
 	memmove(data->name, eth_dev->data->name, sizeof(data->name));
-	data->nb_rx_queues = (uint16_t)pmd_ring->internals.nb_rx_queues;
-	data->nb_tx_queues = (uint16_t)pmd_ring->internals.nb_tx_queues;
+	data->nb_rx_queues = (uint16_t)internals->nb_rx_queues;
+	data->nb_tx_queues = (uint16_t)internals->nb_tx_queues;
 	data->dev_link = pmd_link;
-	data->mac_addrs = &pmd_ring->internals.address;
+	data->mac_addrs = &internals->address;
 
 	eth_dev->data = data;
 	eth_dev->driver = NULL;
@@ -872,7 +871,7 @@ rte_eth_from_ivshmem(struct rte_ivshmem_metadata_pmd_ring * pmd_ring)
 
 	TAILQ_INIT(&(eth_dev->link_intr_cbs));
 
-	pmd_ring->internals.state = STATE_NORMAL;
+	internals->state = STATE_NORMAL;
 
 	/* finally assign rx and tx ops */
 	eth_dev->rx_pkt_burst = eth_ring_normal_rx;

@@ -35,6 +35,8 @@ include $(RTE_SDK)/mk/rte.vars.mk
 LIB = librte_ivshmem.a
 
 CFLAGS += $(WERROR_FLAGS) -I$(SRCDIR) -O3
+CFLAGS += -I$(RTE_SDK)/drivers/net/ring
+CFLAGS += -I$(RTE_SDK)/lib/librte_ether
 
 EXPORT_MAP := rte_ivshmem_version.map
 

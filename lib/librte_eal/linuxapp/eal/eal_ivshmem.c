@@ -53,6 +53,8 @@
 #include <rte_malloc.h>
 #include <rte_common.h>
 #include <rte_ivshmem.h>
+
+#include <rte_ethdev.h>
 #include <rte_eth_ring.h>
 
 #include "eal_internal_cfg.h"
@@ -919,7 +921,7 @@ rte_eal_ivshmem_obj_init(void)
 	for(i = 0; i < ivshmem_config->pmd_rings_cnt; i++)
 	{
 		pmd_ring = &ivshmem_config->pmd_rings[i];
-		rte_eth_from_ivshmem(pmd_ring);
+		ret = rte_eth_from_internals(pmd_ring->name, &pmd_ring->internals);
 		if(ret == -1)
 		{
 			RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",

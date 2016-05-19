@@ -44,7 +44,8 @@ extern "C" {
 
 /* XXX: there are some duplicated fields among these two structs */
 
-struct rte_ivshmem_metadata_pmd_ring;
+//struct rte_eth_rxconf;
+//struct rte_
 
 struct rx_ring_queue {
 	struct rte_ring *rng;
@@ -123,7 +124,7 @@ int rte_eth_from_rings(const char *name,
 		const unsigned nb_tx_queues,
 		const unsigned numa_node);
 
-int rte_eth_from_ivshmem(struct rte_ivshmem_metadata_pmd_ring * pmd_ring);
+int rte_eth_from_internals(char * name, struct pmd_internals * internals);
 
 /**
  * Create a new ethdev port from a ring

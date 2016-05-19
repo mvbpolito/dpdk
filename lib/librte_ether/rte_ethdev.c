@@ -65,9 +65,12 @@
 #include <rte_errno.h>
 #include <rte_spinlock.h>
 #include <rte_string_fns.h>
-#include <rte_ivshmem.h>
+//#include <rte_ivshmem.h>
+int rte_ivshmem_ethdev_attach(const char * device, char * name);
 
-#include <rte_eth_ring.h>
+//#include <rte_eth_ring.h>
+int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id);
+int rte_eth_ring_remove_bypass_device(uint8_t normal_id);
 
 #include "rte_ether.h"
 #include "rte_ethdev.h"
