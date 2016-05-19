@@ -3250,7 +3250,7 @@ rte_eth_copy_pci_info(struct rte_eth_dev *eth_dev, struct rte_pci_device *pci_de
 }
 
 int
-rte_eth_add_slave_to_ring(const char * old, const char * new)
+rte_eth_add_bypass_to_ring(const char * old, const char * new)
 {
 	uint8_t old_portid, new_portid;
 	int ret;
@@ -3272,11 +3272,11 @@ rte_eth_add_slave_to_ring(const char * old, const char * new)
 		return -1;
 	}
 
-	return rte_eth_ring_add_secondary_device(old_portid, new_portid);
+	return rte_eth_ring_add_bypass_device(old_portid, new_portid);
 }
 
 int
-rte_eth_remove_slave_from_ring(const char * id)
+rte_eth_remove_bypass_from_ring(const char * id)
 {
 	uint8_t old_portid;
 	int ret;
@@ -3290,5 +3290,5 @@ rte_eth_remove_slave_from_ring(const char * id)
 		return -1;
 	}
 
-	return rte_eth_ring_remove_secondary_device(old_portid);
+	return rte_eth_ring_remove_bypass_device(old_portid);
 }
