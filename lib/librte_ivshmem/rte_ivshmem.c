@@ -592,6 +592,7 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 {
 	struct ivshmem_config * config;
 	struct rte_ivshmem_metadata * metadata;
+	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
 	int ret;
 	unsigned i;
 
@@ -634,8 +635,10 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 	metadata = config->metadata;
 	/* look for a free entry in the metadata file */
 	for(i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS; i++) {
-		if(metadata->pmd_rings[i].name[0] == '\0')
+		if(metadata->pmd_rings[i].name[0] == '\0') {
+			pmd_ring = &metadata->pmd_rings[i];
 			break;
+		}
 	}
 
 	if(i == RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS) {
@@ -644,17 +647,27 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 	}
 
 	/* copy the device name */
-	snprintf(metadata->pmd_rings[i].name, sizeof(metadata->pmd_rings[i].name),
-		"%s", name);
+	snprintf(pmd_ring->name, sizeof(pmd_ring->name), "%s", name);
 
-	metadata->pmd_rings[i].nb_rx_queues = nb_rx_queues;
-	metadata->pmd_rings[i].nb_tx_queues = nb_tx_queues;
+	/* save all the data into the internals struct */
+	pmd_ring->internals.nb_rx_queues = nb_rx_queues;
+	pmd_ring->internals.nb_tx_queues = nb_tx_queues;
 
-	memcpy(metadata->pmd_rings[i].rx_queues, rx_queues,
-			nb_rx_queues*sizeof(rx_queues[0]));
+	for (i = 0; i < nb_rx_queues; i++) {
+		pmd_ring->internals.rx_ring_queues[i].rng = rx_queues[i];
+	}
+	for (i = 0; i < nb_tx_queues; i++) {
+		pmd_ring->internals.tx_ring_queues[i].rng = tx_queues[i];
+	}
 
-	memcpy(metadata->pmd_rings[i].tx_queues, tx_queues,
-			nb_tx_queues*sizeof(tx_queues[0]));
+	//metadata->pmd_rings[i].nb_rx_queues = nb_rx_queues;
+	//metadata->pmd_rings[i].nb_tx_queues = nb_tx_queues;
+    //
+	//memcpy(metadata->pmd_rings[i].rx_queues, rx_queues,
+	//		nb_rx_queues*sizeof(rx_queues[0]));
+    //
+	//memcpy(metadata->pmd_rings[i].tx_queues, tx_queues,
+	//		nb_tx_queues*sizeof(tx_queues[0]));
 
 	rte_spinlock_unlock(&config->sl);
 	return 0;
