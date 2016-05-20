@@ -706,10 +706,8 @@ rte_ivshmem_metadata_get_pmd_internals(const char *md_name, const char *port_nam
 		goto err;
 	}
 
-	return &pmd_ring->internals;
-
 	rte_spinlock_unlock(&config->sl);
-	return 0;
+	return &pmd_ring->internals;
 
 err:
 	rte_spinlock_unlock(&config->sl);
