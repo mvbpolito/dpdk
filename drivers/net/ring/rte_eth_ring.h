@@ -80,7 +80,7 @@ struct tx_ring_queue {
 	rte_atomic64_t err_pkts;
 };
 
-enum {STATE_NORMAL, STATE_BYPASS, STATE_ERROR};
+enum state_t {STATE_NORMAL, STATE_BYPASS, STATE_ERROR};
 
 struct pmd_internals {
 	unsigned nb_rx_queues;
@@ -89,12 +89,7 @@ struct pmd_internals {
 	struct rx_ring_queue rx_ring_queues[RTE_PMD_RING_MAX_RX_RINGS];
 	struct tx_ring_queue tx_ring_queues[RTE_PMD_RING_MAX_TX_RINGS];
 
-	unsigned int state;
-	/* how is the pmd behaving?
-	 * 0: normal mode
-	 * 1: bypass mode
-	 * 2: error
-	 */
+	enum state_t state;
 
 	struct ether_addr address;
 };
