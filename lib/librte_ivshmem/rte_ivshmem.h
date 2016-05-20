@@ -140,6 +140,10 @@ int rte_ivshmem_metadata_add_pmd_ring(const char *name,
 		struct rte_ring * const tx_queues[], const unsigned nb_tx_queues,
 		const char * md_name);
 
+struct pmd_internals *
+rte_ivshmem_metadata_get_pmd_internals(const char *md_name,
+	const char *port_name);
+
 /**
  * Adds a mempool to a specific metadata file
  *

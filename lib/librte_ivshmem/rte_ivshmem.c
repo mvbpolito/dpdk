@@ -677,6 +677,45 @@ err:
 	return -1;
 }
 
+struct pmd_internals *
+rte_ivshmem_metadata_get_pmd_internals(const char *md_name, const char *port_name)
+{
+	struct ivshmem_config * config;
+	struct rte_ivshmem_metadata * metadata;
+	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
+	unsigned i;
+
+	if(md_name == NULL || md_name == NULL)
+		return NULL;
+
+	config = get_config_by_name(md_name);
+
+	rte_spinlock_lock(&config->sl);
+	metadata = config->metadata;
+
+	/* look for a free entry in the metadata file */
+	for(i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS; i++) {
+		pmd_ring = &metadata->pmd_rings[i];
+		if (!strncmp(pmd_ring->name, port_name, sizeof(pmd_ring->name))) {
+			break;
+		}
+	}
+
+	if(i == RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS) {
+		RTE_LOG(ERR, EAL, "PMD not found!\n");
+		goto err;
+	}
+
+	return &pmd_ring->internals;
+
+	rte_spinlock_unlock(&config->sl);
+	return 0;
+
+err:
+	rte_spinlock_unlock(&config->sl);
+	return NULL;
+}
+
 int
 rte_ivshmem_metadata_add_memzone(const struct rte_memzone * mz, const char * name)
 {
