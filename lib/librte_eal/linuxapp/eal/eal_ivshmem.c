@@ -388,8 +388,9 @@ read_metadata(int fd, uint64_t flen,
 		memcpy(&ivshmem_config->pmd_rings[cnt], pmd_ring, sizeof(*pmd_ring));
 
 		cnt++;
+		ivshmem_config->pmd_rings_to_create++;
 	}
-	ivshmem_config->pmd_rings_to_create = i + 1;
+
 	ivshmem_config->pmd_rings_cnt = cnt;
 
 	return 0;
