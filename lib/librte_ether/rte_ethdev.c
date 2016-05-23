@@ -3259,7 +3259,7 @@ rte_eth_add_bypass_to_ring(const char * old, const char * new)
 	int ret;
 
 	RTE_LOG(ERR, EAL, "rte_eth: adding slave '%s' to port '%s'\n",
-		old, new);
+		new, old);
 
 	/* does the old port exist? */
 	ret = rte_eth_dev_get_port_by_name(old, &old_portid);
