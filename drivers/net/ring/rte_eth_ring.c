@@ -48,6 +48,8 @@
 #define ETH_RING_ACTION_CREATE		"CREATE"
 #define ETH_RING_ACTION_ATTACH		"ATTACH"
 
+#define CAP_MAGIC ((void *)0x444e7834082c83a7)
+
 static const char *valid_arguments[] = {
 	ETH_RING_NUMA_NODE_ACTION_ARG,
 	NULL
@@ -63,7 +65,7 @@ static struct rte_eth_link pmd_link = {
 static int
 buf_is_cap(struct rte_mbuf * buf)
 {
-	if(buf->userdata == buf_is_cap)
+	if(buf->userdata == CAP_MAGIC)
 		return 1;
 
 	return 0;
@@ -120,7 +122,7 @@ send_cap_normal(void *q)
 	 * buf_is_cap
 	 */
 	for (i = 0; i < 5; i++)
-		caps[i]->userdata = buf_is_cap;
+		caps[i]->userdata = CAP_MAGIC;
 
 	ntosend = 5;
 	i = 0;
@@ -165,7 +167,7 @@ send_cap_bypass(void *q)
 	 * buf_is_cap
 	 */
 	for (i = 0; i < 5; i++)
-		caps[i]->userdata = buf_is_cap;
+		caps[i]->userdata = CAP_MAGIC;
 
 	ntosend = 5;
 	i = 0;
