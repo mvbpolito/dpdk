@@ -784,7 +784,7 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 			return -1;
 		}
 
-		if (map_segments(entries, n, fd, res->phys_addr) , 0) {
+		if (map_segments(entries, n, fd, res->phys_addr) < 0) {
 			RTE_LOG(ERR, EAL, "Could not map segments from"
 					" device %02x:%02x.%x!\n", dev->addr.bus,
 					dev->addr.devid, dev->addr.function);
