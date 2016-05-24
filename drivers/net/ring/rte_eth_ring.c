@@ -192,10 +192,9 @@ eth_ring_normal_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct rx_ring_queue *r = q;
 	const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r->rng,
 			ptrs, nb_bufs);
-	if (r->rng->flags & RING_F_SC_DEQ)
-		r->rx_pkts.cnt += nb_rx;
-	else
-		rte_atomic64_add(&(r->rx_pkts), nb_rx);
+
+	r->rx_pkts += nb_rx;
+
 	return nb_rx;
 }
 
@@ -206,13 +205,10 @@ eth_ring_normal_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct tx_ring_queue *r = q;
 	const uint16_t nb_tx = (uint16_t)rte_ring_enqueue_burst(r->rng,
 			ptrs, nb_bufs);
-	if (r->rng->flags & RING_F_SP_ENQ) {
-		r->tx_pkts.cnt += nb_tx;
-		r->err_pkts.cnt += nb_bufs - nb_tx;
-	} else {
-		rte_atomic64_add(&(r->tx_pkts), nb_tx);
-		rte_atomic64_add(&(r->err_pkts), nb_bufs - nb_tx);
-	}
+
+	r->tx_pkts += nb_tx;
+	r->err_pkts += nb_bufs - nb_tx;
+
 	return nb_tx;
 }
 
@@ -225,8 +221,8 @@ eth_ring_bypass_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct tx_ring_queue *r = q;
 	const uint16_t nb_tx = rte_eth_tx_burst(r->bypass_id, 0, bufs, nb_bufs);
 
-	r->tx_pkts.cnt += nb_tx;
-	r->err_pkts.cnt += nb_bufs - nb_tx;
+	r->tx_pkts += nb_tx;
+	r->err_pkts += nb_bufs - nb_tx;
 
 	return nb_tx;
 }
@@ -248,7 +244,7 @@ eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 	const uint16_t nb_rx = rte_eth_rx_burst(r->bypass_id, 0, bufs, nb_bufs);
 
-	r->rx_pkts.cnt += nb_rx;
+	r->rx_pkts += nb_rx;
 
 	return nb_rx;
 }
@@ -385,7 +381,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		}
 	}
 
-	rx_q->rx_pkts.cnt += nb_rx;
+	rx_q->rx_pkts += nb_rx;
 
 	return nb_rx;
 }
@@ -411,7 +407,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	/* read packets in bypass device */
 	uint16_t nb_rx = rte_eth_rx_burst(rx_q->bypass_id, 0, bufs, nb_bufs);
 
-	rx_q->rx_pkts.cnt += nb_rx;
+	rx_q->rx_pkts += nb_rx;
 
 	/*
 	 * XXX: remove the buffers that are still caps
@@ -601,14 +597,14 @@ eth_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *igb_stats)
 
 	for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS &&
 			i < internal->nb_rx_queues; i++) {
-		igb_stats->q_ipackets[i] = internal->rx_ring_queues[i].rx_pkts.cnt;
+		igb_stats->q_ipackets[i] = internal->rx_ring_queues[i].rx_pkts;
 		rx_total += igb_stats->q_ipackets[i];
 	}
 
 	for (i = 0; i < RTE_ETHDEV_QUEUE_STAT_CNTRS &&
 			i < internal->nb_tx_queues; i++) {
-		igb_stats->q_opackets[i] = internal->tx_ring_queues[i].tx_pkts.cnt;
-		igb_stats->q_errors[i] = internal->tx_ring_queues[i].err_pkts.cnt;
+		igb_stats->q_opackets[i] = internal->tx_ring_queues[i].tx_pkts;
+		igb_stats->q_errors[i] = internal->tx_ring_queues[i].err_pkts;
 		tx_total += igb_stats->q_opackets[i];
 		tx_err_total += igb_stats->q_errors[i];
 	}
@@ -624,10 +620,10 @@ eth_stats_reset(struct rte_eth_dev *dev)
 	unsigned i;
 	struct pmd_internals *internal = dev->data->dev_private;
 	for (i = 0; i < internal->nb_rx_queues; i++)
-		internal->rx_ring_queues[i].rx_pkts.cnt = 0;
+		internal->rx_ring_queues[i].rx_pkts = 0;
 	for (i = 0; i < internal->nb_tx_queues; i++) {
-		internal->tx_ring_queues[i].tx_pkts.cnt = 0;
-		internal->tx_ring_queues[i].err_pkts.cnt = 0;
+		internal->tx_ring_queues[i].tx_pkts = 0;
+		internal->tx_ring_queues[i].err_pkts = 0;
 	}
 }
 

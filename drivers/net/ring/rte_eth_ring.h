@@ -59,7 +59,7 @@ struct rx_ring_queue {
 	struct rte_mempool *mb_pool;
 	/**< Reference to mbuf pool to use for RX queue */
 
-	rte_atomic64_t rx_pkts;
+	uint64_t rx_pkts;
 };
 
 struct tx_ring_queue {
@@ -76,8 +76,8 @@ struct tx_ring_queue {
 	rte_spinlock_t send_cap_lock;
 	unsigned int cap_sent;	/* indicates if a cap has been sent using this queue*/
 
-	rte_atomic64_t tx_pkts;
-	rte_atomic64_t err_pkts;
+	uint64_t tx_pkts;
+	uint64_t err_pkts;
 };
 
 enum state_t {STATE_NORMAL, STATE_BYPASS, STATE_ERROR};
