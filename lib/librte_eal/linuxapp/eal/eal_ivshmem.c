@@ -925,7 +925,7 @@ rte_eal_ivshmem_obj_init(void)
 		i < ivshmem_config->pmd_rings_cnt; i++)
 	{
 		pmd_ring = &ivshmem_config->pmd_rings[i];
-		ret = rte_eth_from_internals(pmd_ring->name, &pmd_ring->internals);
+		ret = rte_eth_from_internals(pmd_ring->name, pmd_ring->internals);
 		if(ret == -1)
 		{
 			RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",

@@ -593,6 +593,8 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 	struct ivshmem_config * config;
 	struct rte_ivshmem_metadata * metadata;
 	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
+	const struct rte_memzone *internals_mz;
+	char mz_name[32];
 	int ret;
 	unsigned i;
 
@@ -631,6 +633,18 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 			return -1;
 	}
 
+	snprintf(mz_name, sizeof(mz_name), "%s_mz", name);
+	internals_mz = rte_memzone_reserve_aligned(mz_name, sizeof(struct pmd_internals),
+		SOCKET_ID_ANY, 0, 0x1000);
+	if (internals_mz == NULL) {
+		RTE_LOG(ERR, EAL, "Cannot allocate memzone for pmd_internals\n");
+		return -1;
+	}
+
+	ret = add_memzone_to_metadata(internals_mz, config);
+	if(ret < 0)
+		return -1;
+
 	rte_spinlock_lock(&config->sl);
 	metadata = config->metadata;
 	/* look for a free entry in the metadata file */
@@ -646,18 +660,20 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 		goto err;
 	}
 
+	pmd_ring->internals = (struct pmd_internals *) internals_mz->addr;
+
 	/* copy the device name */
 	snprintf(pmd_ring->name, sizeof(pmd_ring->name), "%s", name);
 
 	/* save all the data into the internals struct */
-	pmd_ring->internals.nb_rx_queues = nb_rx_queues;
-	pmd_ring->internals.nb_tx_queues = nb_tx_queues;
+	pmd_ring->internals->nb_rx_queues = nb_rx_queues;
+	pmd_ring->internals->nb_tx_queues = nb_tx_queues;
 
 	for (i = 0; i < nb_rx_queues; i++) {
-		pmd_ring->internals.rx_ring_queues[i].rng = rx_queues[i];
+		pmd_ring->internals->rx_ring_queues[i].rng = rx_queues[i];
 	}
 	for (i = 0; i < nb_tx_queues; i++) {
-		pmd_ring->internals.tx_ring_queues[i].rng = tx_queues[i];
+		pmd_ring->internals->tx_ring_queues[i].rng = tx_queues[i];
 	}
 
 	//metadata->pmd_rings[i].nb_rx_queues = nb_rx_queues;
@@ -707,7 +723,7 @@ rte_ivshmem_metadata_get_pmd_internals(const char *md_name, const char *port_nam
 	}
 
 	rte_spinlock_unlock(&config->sl);
-	return &pmd_ring->internals;
+	return pmd_ring->internals;
 
 err:
 	rte_spinlock_unlock(&config->sl);
