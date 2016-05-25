@@ -142,6 +142,7 @@ send_cap_bypass(void *q)
 {
 	struct tx_ring_queue *tx_q = q;
 
+
 	if (rte_spinlock_trylock(&tx_q->send_cap_lock) == 0)
 		return;
 
@@ -153,11 +154,10 @@ send_cap_bypass(void *q)
 
 	tx_q->cap_sent = 1;
 
-	/* A horrible method to lock for the memory pool */
 	struct rte_eth_dev * normal_port =
 		normal_port = &rte_eth_devices[tx_q->normal_id];
-	const struct pmd_internals *internal = normal_port->data->dev_private;
-	struct rte_mempool *mb_pool = internal->rx_ring_queues[0].mb_pool;
+	struct pmd_internals * internals = normal_port->data->dev_private;
+	struct rte_mempool *mb_pool = internals->rx_ring_queues[0].mb_pool;
 
 	struct rte_mbuf *caps[5] = {0};
 
@@ -178,6 +178,11 @@ send_cap_bypass(void *q)
 	do {
 		i += eth_ring_bypass_tx(q, caps, ntosend - i);
 	} while(i < ntosend);
+
+
+	normal_port->tx_pkt_burst = eth_ring_normal_tx;
+
+	internals->state = STATE_NORMAL;
 
 	rte_spinlock_unlock(&tx_q->send_cap_lock);
 }
@@ -450,17 +455,7 @@ eth_ring_send_cap_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 static uint16_t
 eth_ring_send_cap_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
-	struct tx_ring_queue *rx_q = q;
-	struct rte_eth_dev * normal_port =
-		normal_port = &rte_eth_devices[rx_q->normal_id];
-	struct pmd_internals * internals = normal_port->data->dev_private;
-
-	normal_port->tx_pkt_burst = eth_ring_normal_tx;
-
 	send_cap_bypass(q);
-
-	internals->state = STATE_NORMAL;
-
 	return eth_ring_normal_tx(q, bufs, nb_bufs);
 }
 
