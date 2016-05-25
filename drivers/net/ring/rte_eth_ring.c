@@ -132,7 +132,7 @@ send_cap_normal(void *q)
 
 	normal_port->tx_pkt_burst = eth_ring_bypass_tx;
 
-	internals->state = STATE_BYPASS;
+	internals->mode = MODE_BYPASS;
 
 	rte_spinlock_unlock(&tx_q->send_cap_lock);
 }
@@ -182,7 +182,7 @@ send_cap_bypass(void *q)
 
 	normal_port->tx_pkt_burst = eth_ring_normal_tx;
 
-	internals->state = STATE_NORMAL;
+	internals->mode = MODE_NORMAL;
 
 	rte_spinlock_unlock(&tx_q->send_cap_lock);
 }
@@ -359,7 +359,6 @@ eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
  * This function is used for a limited amount of time to read packets while
  * creating a direct path. The function does the following:
  * - reads packets until the cap packet is found
- * - set the "capfound" flag of the device
  * - changes the receive function to eth_ring_bypass_rx
  */
 static uint16_t
@@ -370,7 +369,6 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
 
-	/* read packets in normal device */
 	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
 
 	for (i = 0; i < nb_rx; i++) {
@@ -379,14 +377,15 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 			 * this is very important, in the case the device is going to be
 			 * closed, send the cap in case it has not been sent
 			 */
-			send_cap_normal(normal_port->data->tx_queues[0]);
+			//send_cap_normal(normal_port->data->tx_queues[0]);
 			normal_port->rx_pkt_burst = eth_ring_bypass_rx;
 			nb_rx--;
+
+			/* XXX: remove and free the buffers that are still caps */
+
 			break;
 		}
 	}
-
-	rx_q->rx_pkts += nb_rx;
 
 	return nb_rx;
 }
@@ -395,7 +394,6 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
  * This function is used for a limited amount of time to read packes while
  * destroying a direct link. It does:
  * - reads packets using ONLY the bypass device until cap is found
- * - sets the "capfound" flag of the device
  * - changes teh receive function to eth_ring_normal_rx
  */
 static uint16_t
@@ -405,18 +403,24 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct rte_eth_dev * normal_port =
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
-	char name[50]; /* XXX: buf size */
+
+	/*
+	 * if the bypass port has been close, read directly from the normal channel
+	 * XXX: add temporal buffer here!
+	 */
+
+	struct pmd_internals *internals = normal_port->data->dev_private;
+	if (internals->bypass_state == BYPASS_DETACHED) {
+		normal_port->rx_pkt_burst = eth_ring_normal_rx;
+		return eth_ring_normal_rx(q, bufs, nb_bufs);
+	}
 
 	/* we cannot use the eth_ring_bypass_rx here because it will also try to read
-	 * the normal device */
-	/* read packets in bypass device */
+	 * the normal device
+	 */
 	uint16_t nb_rx = rte_eth_rx_burst(rx_q->bypass_id, 0, bufs, nb_bufs);
 
 	rx_q->rx_pkts += nb_rx;
-
-	/*
-	 * XXX: remove the buffers that are still caps
-	 */
 
 	for (i = 0; i < nb_rx; i++) {
 		if (buf_is_cap(bufs[i])) {
@@ -425,18 +429,32 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 			 * this is very important, in the case the device is going to be
 			 * closed, send the cap in case it has not been sent
 			 */
-			send_cap_bypass(normal_port->data->tx_queues[0]);
+			//send_cap_bypass(normal_port->data->tx_queues[0]);
 
 			normal_port->rx_pkt_burst = eth_ring_normal_rx;
 			nb_rx--;
-			rte_eth_dev_stop(rx_q->bypass_id);
-			rte_eth_dev_close(rx_q->bypass_id);
-			rte_eth_dev_detach(rx_q->bypass_id, name);
+
+			/* XXX: remove and free the buffers that are still caps */
 			break;
 		}
 	}
 
 	return nb_rx;
+}
+
+static void
+close_bypass(void *arg)
+{
+	struct pmd_internals *internals = arg;
+	char name[50]; /* XXX: buf size */
+	uint8_t bypass_id = internals->rx_ring_queues[0].bypass_id;
+
+	/* XXX: read packets into temporal buffer */
+	rte_eth_dev_stop(bypass_id);
+	rte_eth_dev_close(bypass_id);
+	rte_eth_dev_detach(bypass_id, name);
+
+	internals->bypass_state = BYPASS_DETACHED;
 }
 
 /*
@@ -765,7 +783,7 @@ rte_eth_from_rings(const char *name, struct rte_ring *const rx_queues[],
 
 	TAILQ_INIT(&(eth_dev->link_intr_cbs));
 
-	internals->state = STATE_NORMAL;
+	internals->mode = MODE_NORMAL;
 
 	/* finally assign rx and tx ops */
 	eth_dev->rx_pkt_burst = eth_ring_normal_rx;
@@ -859,7 +877,7 @@ rte_eth_from_internals(char * name, struct pmd_internals * internals)
 
 	TAILQ_INIT(&(eth_dev->link_intr_cbs));
 
-	internals->state = STATE_NORMAL;
+	internals->mode = MODE_NORMAL;
 
 	/* finally assign rx and tx ops */
 	eth_dev->rx_pkt_burst = eth_ring_normal_rx;
@@ -987,6 +1005,7 @@ int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 	 * sending traffic
 	 */
 	schedule_timeout(send_cap_bypass, tx_q, 10000);
+	schedule_timeout(close_bypass, normal_port->data->dev_private, 100000);
 
 	/* when called, close the secondary device */
 	normal_port->rx_pkt_burst = eth_ring_destruction_rx;
