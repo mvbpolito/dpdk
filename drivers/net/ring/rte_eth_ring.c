@@ -908,7 +908,7 @@ rte_eth_from_ring(struct rte_ring *r)
 int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 {
 	struct rte_eth_dev *normal_port;
-
+	struct pmd_internals *internals;
 	struct rx_ring_queue *rx_q;
 	struct tx_ring_queue *tx_q;
 	int errval;
@@ -926,6 +926,9 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	rte_eth_dev_stop(bypass_id);
 
 	normal_port = &rte_eth_devices[normal_id];
+
+	internals = normal_port->data->dev_private;
+	internals->bypass_state = BYPASS_ATTACHED; /* bypass is being used */
 
 	/* Setup device */
 	/* TODO: multiqueue support  */
