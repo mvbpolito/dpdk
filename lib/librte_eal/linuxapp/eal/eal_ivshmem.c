@@ -884,79 +884,6 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 	return 0;
 }
 
-static int
-ivshmem_remove_device(struct rte_pci_device * dev)
-{
-	struct rte_pci_resource * res;
-	int fd, ret;
-	char path[PATH_MAX];
-	struct rte_ivshmem_metadata_entry entries[RTE_LIBRTE_IVSHMEM_MAX_ENTRIES];
-	int n;
-
-	if(dev == NULL)
-		return -1;
-
-	if (is_ivshmem_device(dev)) {
-
-		/* IVSHMEM memory is always on BAR2 */
-		res = &dev->mem_resource[2];
-
-		/* if we don't have a BAR2 */
-		if (res->len == 0)
-			return 0;
-
-		/* construct pci device path */
-		snprintf(path, sizeof(path), IVSHMEM_RESOURCE_PATH,
-				dev->addr.domain, dev->addr.bus, dev->addr.devid,
-				dev->addr.function);
-
-		/* try to find memseg */
-		fd = open(path, O_RDWR);
-		if (fd < 0) {
-			RTE_LOG(ERR, EAL, "Could not open %s\n", path);
-			return -1;
-		}
-
-		/* check if it's a DPDK IVSHMEM device */
-		ret = has_ivshmem_metadata(fd, res->len);
-
-		if (ret < 0) {
-			RTE_LOG(ERR, EAL, "Could not read IVSHMEM device: %s\n",
-					strerror(errno));
-			close(fd);
-			return -1;
-		} else if (ret == 0) {
-			close(fd);
-			RTE_LOG(DEBUG, EAL, "Skipping non-DPDK IVSHMEM device\n");
-			return 0;
-		}
-
-		if (read_metadata(fd, res->len, entries, &n) < 0) {
-			RTE_LOG(ERR, EAL, "Could not read metadata from"
-					" device %02x:%02x.%x!\n", dev->addr.bus,
-					dev->addr.devid, dev->addr.function);
-			close(fd);
-			return -1;
-		}
-
-		if (unmap_segments(entries, n, res->phys_addr) < 0) {
-			RTE_LOG(ERR, EAL, "Could not unmap segments from"
-					" device %02x:%02x.%x!\n", dev->addr.bus,
-					dev->addr.devid, dev->addr.function);
-			close(fd);
-			return -1;
-		}
-
-		RTE_LOG(INFO, EAL, "Found IVSHMEM device %02x:%02x.%x\n",
-				dev->addr.bus, dev->addr.devid, dev->addr.function);
-
-		/* close the BAR fd */
-		close(fd);
-	}
-
-	return 0;
-}
-
 /* this happens at a later stage, after general EAL memory initialization */
 int
 rte_eal_ivshmem_obj_init(void)
@@ -1317,7 +1244,10 @@ int rte_ivshmem_dev_attach(const char * device)
 int rte_ivshmem_dev_detach(const char *device)
 {
 	struct rte_pci_device * dev;
-	int ret;
+	struct rte_pci_resource * res;
+	char path[PATH_MAX];
+	struct rte_ivshmem_metadata_entry entries[RTE_LIBRTE_IVSHMEM_MAX_ENTRIES];
+	int n, fd, ret;
 
 	dev = rte_eal_pci_scan_device(device);
 	if(dev == NULL) {
@@ -1330,16 +1260,63 @@ int rte_ivshmem_dev_detach(const char *device)
 		return -1;
 	}
 
-	/* this is not correct, this should be the last step */
-	ret = ivshmem_remove_device(dev);
-	if(ret < 0)
+	/* IVSHMEM memory is always on BAR2 */
+	res = &dev->mem_resource[2];
+
+	/* if we don't have a BAR2 */
+	if (res->len == 0)
+		return 0;
+
+	/* construct pci device path */
+	snprintf(path, sizeof(path), IVSHMEM_RESOURCE_PATH,
+			dev->addr.domain, dev->addr.bus, dev->addr.devid,
+			dev->addr.function);
+
+	/* try to find memseg */
+	fd = open(path, O_RDWR);
+	if (fd < 0) {
+		RTE_LOG(ERR, EAL, "Could not open %s\n", path);
 		return -1;
+	}
+
+	/* check if it's a DPDK IVSHMEM device */
+	ret = has_ivshmem_metadata(fd, res->len);
+
+	if (ret < 0) {
+		RTE_LOG(ERR, EAL, "Could not read IVSHMEM device: %s\n",
+				strerror(errno));
+		close(fd);
+		return -1;
+	} else if (ret == 0) {
+		close(fd);
+		RTE_LOG(DEBUG, EAL, "Skipping non-DPDK IVSHMEM device\n");
+		return 0;
+	}
+
+	if (read_metadata(fd, res->len, entries, &n) < 0) {
+		RTE_LOG(ERR, EAL, "Could not read metadata from"
+				" device %02x:%02x.%x!\n", dev->addr.bus,
+				dev->addr.devid, dev->addr.function);
+		close(fd);
+		return -1;
+	}
 
 	ret = rte_eal_ivshmem_obj_uninit();
 	if(ret < 0) {
-		RTE_LOG(ERR, EAL, "Error adding memzones to DPDK\n");
+		RTE_LOG(ERR, EAL, "Error removing memzones to DPDK\n");
 		return -1;
 	}
+
+	if (unmap_segments(entries, n, res->phys_addr) < 0) {
+		RTE_LOG(ERR, EAL, "Could not unmap segments from"
+				" device %02x:%02x.%x!\n", dev->addr.bus,
+				dev->addr.devid, dev->addr.function);
+		close(fd);
+		return -1;
+	}
+
+	/* close the BAR fd */
+	close(fd);
 
 	return 0;
 }
