@@ -67,6 +67,7 @@
 #include <rte_string_fns.h>
 //#include <rte_ivshmem.h>
 int rte_ivshmem_ethdev_attach(const char * device, char * name);
+int rte_ivshmem_ethdev_detach(const char *device);
 
 //#include <rte_eth_ring.h>
 int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id);
@@ -657,6 +658,7 @@ rte_eth_dev_detach(uint8_t port_id, char *name)
 {
 	struct rte_pci_addr addr;
 	int ret;
+	char address[40];
 
 	if (name == NULL)
 		return -EINVAL;
@@ -674,8 +676,21 @@ rte_eth_dev_detach(uint8_t port_id, char *name)
 				addr.devid, addr.function);
 
 		return ret;
-	} else
-		return rte_eth_dev_detach_vdev(port_id, name);
+	} else {
+		ret = rte_eth_dev_detach_vdev(port_id, name);
+		if (!ret)
+			return ret;
+
+		ret = rte_eth_dev_get_addr_by_port(port_id, &addr);
+		if (ret < 0)
+			return ret;
+		snprintf(address, RTE_ETH_NAME_MAX_LEN,
+				"%04x:%02x:%02x.%d",
+				addr.domain, addr.bus,
+				addr.devid, addr.function);
+
+		return rte_ivshmem_ethdev_detach(address);
+	}
 }
 
 static int

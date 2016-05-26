@@ -120,7 +120,9 @@ int rte_eth_from_rings(const char *name,
 		const unsigned nb_tx_queues,
 		const unsigned numa_node);
 
-int rte_eth_from_internals(char * name, struct pmd_internals * internals);
+int rte_eth_from_internals(char * name,
+	struct pmd_internals * internals, struct rte_pci_device *dev);
+int rte_pmd_ring_destroy(const char *name, int destroy_internals);
 
 /**
  * Create a new ethdev port from a ring
@@ -136,12 +138,9 @@ int rte_eth_from_internals(char * name, struct pmd_internals * internals);
  */
 int rte_eth_from_ring(struct rte_ring *r);
 
+
 int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id);
-
 int rte_eth_ring_remove_bypass_device(uint8_t normal_id);
-
-
-
 
 #ifdef __cplusplus
 }

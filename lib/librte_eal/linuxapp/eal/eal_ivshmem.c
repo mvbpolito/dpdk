@@ -93,6 +93,7 @@ struct ivshmem_shared_config {
 	uint32_t memzone_cnt;
 	struct rte_ivshmem_metadata_pmd_ring pmd_rings[RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS];
 	uint32_t pmd_rings_cnt;
+	struct rte_pci_device *dev;
 };
 
 static struct ivshmem_shared_config * ivshmem_config;
@@ -858,6 +859,7 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 			return -1;
 		}
 
+
 		if (read_metadata(fd, res->len, entries, &n) < 0) {
 			RTE_LOG(ERR, EAL, "Could not read metadata from"
 					" device %02x:%02x.%x!\n", dev->addr.bus,
@@ -877,6 +879,7 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 		RTE_LOG(INFO, EAL, "Found IVSHMEM device %02x:%02x.%x\n",
 				dev->addr.bus, dev->addr.devid, dev->addr.function);
 
+		ivshmem_config->dev = dev;
 		/* close the BAR fd */
 		close(fd);
 	}
@@ -1008,7 +1011,8 @@ rte_eal_ivshmem_obj_init(void)
 	for(i = 0; i < ivshmem_config->pmd_rings_cnt; i++)
 	{
 		pmd_ring = &ivshmem_config->pmd_rings[i];
-		ret = rte_eth_from_internals(pmd_ring->name, pmd_ring->internals);
+		ret = rte_eth_from_internals(pmd_ring->name,
+				pmd_ring->internals, ivshmem_config->dev);
 		if(ret == -1)
 		{
 			RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",
@@ -1037,11 +1041,11 @@ rte_eal_ivshmem_obj_uninit(void)
 	struct rte_mempool_list * mempool_list = NULL;
 	struct rte_mem_config * mcfg;
 	struct rte_memzone * mz;
-	//struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
+	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
 	struct rte_ring * r;
 	//struct rte_mempool * mp;
 	struct rte_tailq_entry *te;
-	//int ret;
+	int ret;
 	unsigned int i, j;
 
 	/* secondary process would not need any object discovery - it'll all
@@ -1133,21 +1137,23 @@ rte_eal_ivshmem_obj_uninit(void)
 	/* the memzones were unmapped */
 	ivshmem_config->memzone_cnt = 0;
 
-	///* find pmd rings */
-	//for(i = 0; i < ivshmem_config->pmd_rings_cnt; i++)
-	//{
-	//	pmd_ring = &ivshmem_config->pmd_rings[i];
-	//	ret = rte_eth_from_internals(pmd_ring->name, pmd_ring->internals);
-	//	if(ret == -1)
-	//	{
-	//		RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",
-	//			pmd_ring->name);
-	//		return -1;
-	//	}
-	//}
-    //
-	///* the pmd rings were destroyed */
-	//ivshmem_config->pmd_rings_cnt = 0;
+	/* find pmd rings */
+	for(i = 0; i < ivshmem_config->pmd_rings_cnt; i++)
+	{
+		pmd_ring = &ivshmem_config->pmd_rings[i];
+		ret = rte_pmd_ring_destroy(pmd_ring->name, 0);
+		if(ret == -1)
+		{
+			RTE_LOG(ERR, EAL, "Cannot remove virtual ethernet device %s!\n",
+				pmd_ring->name);
+			return -1;
+		}
+
+		RTE_LOG(INFO, EAL, "pmd_ring '%s' has been removed!\n", pmd_ring->name);
+	}
+
+	/* the pmd rings were destroyed */
+	ivshmem_config->pmd_rings_cnt = 0;
 
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
 
@@ -1210,6 +1216,11 @@ int rte_ivshmem_ethdev_attach(const char * device, char * name)
 	strcpy(name, pmd_ring->name);
 
 	return 0;
+}
+
+int rte_ivshmem_ethdev_detach(const char *device)
+{
+	return rte_ivshmem_dev_detach(device);
 }
 
 int rte_ivshmem_dev_attach(const char * device)

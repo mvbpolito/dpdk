@@ -195,6 +195,7 @@ int rte_ivshmem_dev_attach(const char * dev);
 int rte_ivshmem_dev_detach(const char *device);
 
 int rte_ivshmem_ethdev_attach(const char * device, char * name);
+int rte_ivshmem_ethdev_detach(const char *device);
 
 #ifdef __cplusplus
 }

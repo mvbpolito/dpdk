@@ -803,7 +803,8 @@ error:
 }
 
 int
-rte_eth_from_internals(char * name, struct pmd_internals * internals)
+rte_eth_from_internals(char * name,
+	struct pmd_internals * internals, struct rte_pci_device *dev)
 {
 	struct rte_eth_dev_data *data = NULL;
 	struct rte_eth_dev *eth_dev = NULL;
@@ -841,6 +842,8 @@ rte_eth_from_internals(char * name, struct pmd_internals * internals)
 		rte_errno = ENOSPC;
 		goto error;
 	}
+
+	eth_dev->pci_dev = dev;
 
 	/* now put it all together
 	 * - store queue data in internals,
@@ -1200,8 +1203,8 @@ out_free:
 	return ret;
 }
 
-static int
-rte_pmd_ring_devuninit(const char *name)
+int
+rte_pmd_ring_destroy(const char *name, int destroy_internals)
 {
 	struct rte_eth_dev *eth_dev = NULL;
 
@@ -1220,12 +1223,19 @@ rte_pmd_ring_devuninit(const char *name)
 	if (eth_dev->data) {
 		rte_free(eth_dev->data->rx_queues);
 		rte_free(eth_dev->data->tx_queues);
-		rte_free(eth_dev->data->dev_private);
+		if(destroy_internals)
+			rte_free(eth_dev->data->dev_private);
 	}
 	rte_free(eth_dev->data);
 
 	rte_eth_dev_release_port(eth_dev);
 	return 0;
+}
+
+static int
+rte_pmd_ring_devuninit(const char *name)
+{
+	return rte_pmd_ring_destroy(name, 1);
 }
 
 static struct rte_driver pmd_ring_drv = {
