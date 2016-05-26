@@ -93,7 +93,6 @@ struct ivshmem_shared_config {
 	uint32_t memzone_cnt;
 	struct rte_ivshmem_metadata_pmd_ring pmd_rings[RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS];
 	uint32_t pmd_rings_cnt;
-	uint32_t pmd_rings_to_create;	/* rings that have to be created */
 };
 
 static struct ivshmem_shared_config * ivshmem_config;
@@ -388,7 +387,6 @@ read_metadata(int fd, uint64_t flen,
 		memcpy(&ivshmem_config->pmd_rings[cnt], pmd_ring, sizeof(*pmd_ring));
 
 		cnt++;
-		ivshmem_config->pmd_rings_to_create++;
 	}
 
 	ivshmem_config->pmd_rings_cnt = cnt;
@@ -921,8 +919,7 @@ rte_eal_ivshmem_obj_init(void)
 	ivshmem_config->memzone_cnt = 0;
 
 	/* find pmd rings */
-	for(i = ivshmem_config->pmd_rings_cnt - ivshmem_config->pmd_rings_to_create;
-		i < ivshmem_config->pmd_rings_cnt; i++)
+	for(i = 0; i < ivshmem_config->pmd_rings_cnt; i++)
 	{
 		pmd_ring = &ivshmem_config->pmd_rings[i];
 		ret = rte_eth_from_internals(pmd_ring->name, pmd_ring->internals);
@@ -935,7 +932,7 @@ rte_eal_ivshmem_obj_init(void)
 	}
 
 	/* the pmd rings were created */
-	ivshmem_config->pmd_rings_to_create = 0;
+	ivshmem_config->pmd_rings_cnt = 0;
 
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
 
