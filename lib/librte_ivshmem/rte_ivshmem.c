@@ -83,6 +83,7 @@ struct ivshmem_config {
 	struct rte_ivshmem_metadata * metadata;
 	struct memseg_cache_entry memseg_cache[IVSHMEM_MAX_PAGES];
 		/**< account for multiple files per segment case */
+	int fd;
 	struct flock lock;
 	rte_spinlock_t sl;
 };
@@ -774,13 +775,14 @@ ivshmem_config_path(char *buffer, size_t bufflen, const char *name)
 
 
 
-static inline
-void *ivshmem_metadata_create(const char *name, size_t size,
-		struct flock *lock)
+static inline void *
+ivshmem_metadata_create(const char *name, struct ivshmem_config *ivshmem_config)
 {
 	int retval, fd;
 	void *metadata_addr;
 	char pathname[PATH_MAX];
+	size_t size = METADATA_SIZE_ALIGNED;
+	struct flock *lock = &ivshmem_config->lock;
 
 	ivshmem_config_path(pathname, sizeof(pathname), name);
 
@@ -789,8 +791,6 @@ void *ivshmem_metadata_create(const char *name, size_t size,
 		RTE_LOG(ERR, EAL, "Cannot open '%s'\n", pathname);
 		return NULL;
 	}
-
-	size = METADATA_SIZE_ALIGNED;
 
 	retval = fcntl(fd, F_SETLK, lock);
 	if (retval < 0){
@@ -820,7 +820,43 @@ void *ivshmem_metadata_create(const char *name, size_t size,
 		return NULL;
 	}
 
+	ivshmem_config->fd = fd;
 	return metadata_addr;
+}
+
+static int
+ivshmem_metadata_destroy(const char *name, struct ivshmem_config *ivshmem_config)
+{
+	char pathname[PATH_MAX];
+	int retval;
+
+	ivshmem_config_path(pathname, sizeof(pathname), name);
+
+	retval = munmap(ivshmem_config->metadata, METADATA_SIZE_ALIGNED);
+	if (retval < 0) {
+		RTE_LOG(ERR, EAL, "Cannot munmap memory for '%s'\n", pathname);
+		return -1;
+	}
+
+	ivshmem_config->metadata = NULL;
+
+	ivshmem_config->lock.l_type = F_UNLCK;
+	retval = fcntl(ivshmem_config->fd, F_SETLK, ivshmem_config->lock);
+	if (retval < 0) {
+		close(ivshmem_config->fd);
+		RTE_LOG(ERR, EAL, "Cannot release lock for '%s'\n", pathname);
+		return -1;
+	}
+
+	close(ivshmem_config->fd);
+
+	retval = unlink(pathname);
+	if (retval < 0) {
+		RTE_LOG(ERR, EAL, "Cannot remvoe '%s'\n", pathname);
+		return -1;
+	}
+
+	return 0;
 }
 
 int rte_ivshmem_metadata_create(const char *name)
@@ -856,11 +892,8 @@ int rte_ivshmem_metadata_create(const char *name)
 	ivshmem_config->lock.l_start = 0;
 	ivshmem_config->lock.l_len = METADATA_SIZE_ALIGNED;
 
-	ivshmem_global_config[index].metadata = ((struct rte_ivshmem_metadata *)
-			ivshmem_metadata_create(
-					name,
-					sizeof(struct rte_ivshmem_metadata),
-					&ivshmem_config->lock));
+	ivshmem_global_config[index].metadata = (struct rte_ivshmem_metadata *)
+			ivshmem_metadata_create(name, ivshmem_config);
 
 	if (ivshmem_global_config[index].metadata == NULL) {
 		rte_spinlock_unlock(&global_cfg_sl);
@@ -876,6 +909,38 @@ int rte_ivshmem_metadata_create(const char *name)
 	rte_spinlock_unlock(&global_cfg_sl);
 
 	return 0;
+}
+
+int rte_ivshmem_metadata_remove(const char *name)
+{
+	struct ivshmem_config *config;
+	int ret;
+	rte_spinlock_lock(&global_cfg_sl);
+
+	config = get_config_by_name(name);
+
+	if (config == NULL) {
+		RTE_LOG(ERR, EAL, "Config %s not found!\n", name);
+		goto unblock_global;
+	}
+
+	rte_spinlock_lock(&config->sl);
+
+	ret = ivshmem_metadata_destroy(name, config);
+	if (ret < 0)
+		goto err;
+
+
+
+	rte_spinlock_lock(&config->sl);
+	rte_spinlock_unlock(&global_cfg_sl);
+	return 0;
+
+err:
+	rte_spinlock_lock(&config->sl);
+unblock_global:
+	rte_spinlock_unlock(&global_cfg_sl);
+	return -1;
 }
 
 int

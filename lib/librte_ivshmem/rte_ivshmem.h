@@ -100,6 +100,8 @@ struct rte_ivshmem_metadata {
  */
 int rte_ivshmem_metadata_create(const char * name);
 
+int rte_ivshmem_metadata_remove(const char * name);
+
 /**
  * Adds memzone to a specific metadata file
  *
