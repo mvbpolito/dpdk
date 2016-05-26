@@ -829,9 +829,17 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 				dev->addr.function);
 
 		/* try to find memseg */
-		fd = open(path, O_RDWR);
+		/* WORKAROUND: try this more than once */
+		int i = 0;
+		do
+		{
+			fd = open(path, O_RDWR);
+			usleep(1000);
+			RTE_LOG(DEBUG, EAL, "%d) Trying to open ivshmem device\n", i);
+		} while(fd < 0 && i++ < 500);
+
 		if (fd < 0) {
-			RTE_LOG(ERR, EAL, "Could not open %s\n", path);
+			RTE_LOG(ERR, EAL, "Could not open %s: Error: %s\n", path, strerror(errno));
 			return -1;
 		}
 
