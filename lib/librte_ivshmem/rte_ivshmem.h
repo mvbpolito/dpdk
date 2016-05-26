@@ -68,6 +68,7 @@ struct rte_ivshmem_metadata_entry {
  */
 struct rte_ivshmem_metadata_pmd_ring {
 	char name[RTE_ETH_NAME_MAX_LEN];	/**< name of the PMD ring device */
+	struct rte_pci_device * dev;
 	//unsigned nb_rx_queues;
 	//unsigned nb_tx_queues;
     //

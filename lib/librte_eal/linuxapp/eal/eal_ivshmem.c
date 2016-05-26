@@ -85,7 +85,6 @@
 struct ivshmem_segment {
 	struct rte_ivshmem_metadata_entry entry;
 	uint64_t align;
-	struct rte_pci_device * dev;
 };
 
 struct ivshmem_shared_config {
@@ -345,7 +344,7 @@ read_metadata(int fd, uint64_t flen,
 
 	RTE_LOG(DEBUG, EAL, "Parsing metadata for \"%s\"\n", metadata.name);
 
-	cnt = 0; //ivshmem_config->memzone_cnt;
+	cnt = ivshmem_config->memzone_cnt;
 	for (i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_ENTRIES; i++) {
 
 		if (cnt == RTE_MAX_MEMSEG) {
@@ -371,7 +370,7 @@ read_metadata(int fd, uint64_t flen,
 	*n = i;	/* number of elements in the metadata file */
 
 	/* read pmd rings */
-	cnt = 0; //ivshmem_config->pmd_rings_cnt;
+	cnt = ivshmem_config->pmd_rings_cnt;
 	for(i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS; i++) {
 
 		if(cnt == RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS)
@@ -868,6 +867,9 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 			return -1;
 		}
 
+		int index = ivshmem_config->pmd_rings_cnt -1;
+		ivshmem_config->pmd_rings[index].dev = dev;
+
 		if (map_segments(entries, n, fd, res->phys_addr) < 0) {
 			RTE_LOG(ERR, EAL, "Could not map segments from"
 					" device %02x:%02x.%x!\n", dev->addr.bus,
@@ -879,7 +881,6 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 		RTE_LOG(INFO, EAL, "Found IVSHMEM device %02x:%02x.%x\n",
 				dev->addr.bus, dev->addr.devid, dev->addr.function);
 
-		ivshmem_config->dev = dev;
 		/* close the BAR fd */
 		close(fd);
 	}
@@ -1012,7 +1013,7 @@ rte_eal_ivshmem_obj_init(void)
 	{
 		pmd_ring = &ivshmem_config->pmd_rings[i];
 		ret = rte_eth_from_internals(pmd_ring->name,
-				pmd_ring->internals, ivshmem_config->dev);
+				pmd_ring->internals, pmd_ring->dev);
 		if(ret == -1)
 		{
 			RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",
