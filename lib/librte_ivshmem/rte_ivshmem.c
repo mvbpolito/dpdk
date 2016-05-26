@@ -102,7 +102,7 @@ get_config_by_name(const char * name)
 	for (i = 0; i < RTE_DIM(ivshmem_global_config); i++) {
 		config = ivshmem_global_config[i].metadata;
 		if (config == NULL)
-			return NULL;
+			continue;
 		if (strncmp(name, config->name, IVSHMEM_NAME_LEN) == 0)
 			return &ivshmem_global_config[i];
 	}
@@ -662,6 +662,7 @@ rte_ivshmem_metadata_add_pmd_ring(const char * name,
 	}
 
 	pmd_ring->internals = (struct pmd_internals *) internals_mz->addr;
+	pmd_ring->mz = internals_mz;
 
 	/* copy the device name */
 	snprintf(pmd_ring->name, sizeof(pmd_ring->name), "%s", name);
@@ -829,6 +830,24 @@ ivshmem_metadata_destroy(const char *name, struct ivshmem_config *ivshmem_config
 {
 	char pathname[PATH_MAX];
 	int retval;
+	unsigned i;
+	struct rte_memzone *mz;
+
+	for (i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_ENTRIES; i++) {
+		if (ivshmem_config->metadata->entry[i].mz.len == 0)
+			break;
+
+		mz = &ivshmem_config->metadata->entry[i].mz;
+		mz->ioremap_addr = 0;	/* this memzone can be freeded */
+	}
+
+	for (i = 0; i < RTE_LIBRTE_IVSHMEM_MAX_PMD_RINGS; i++) {
+		if (ivshmem_config->metadata->pmd_rings[i].name[0] == '\0')
+			break;
+
+		rte_memzone_free(ivshmem_config->metadata->pmd_rings[i].mz);
+	}
+
 
 	ivshmem_config_path(pathname, sizeof(pathname), name);
 
@@ -930,14 +949,12 @@ int rte_ivshmem_metadata_remove(const char *name)
 	if (ret < 0)
 		goto err;
 
-
-
-	rte_spinlock_lock(&config->sl);
+	rte_spinlock_unlock(&config->sl);
 	rte_spinlock_unlock(&global_cfg_sl);
 	return 0;
 
 err:
-	rte_spinlock_lock(&config->sl);
+	rte_spinlock_unlock(&config->sl);
 unblock_global:
 	rte_spinlock_unlock(&global_cfg_sl);
 	return -1;

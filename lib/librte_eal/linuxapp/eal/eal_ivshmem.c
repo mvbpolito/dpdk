@@ -1204,15 +1204,15 @@ int rte_ivshmem_ethdev_attach(const char * device, char * name)
 {
 	int err;
 	struct rte_ivshmem_metadata_pmd_ring * pmd_ring;
-	int index;
+	//int index;
 
 	err = rte_ivshmem_dev_attach(device);
 	if(err)
 		return err;
 
 	/* XXX: what about devices with multiple pmd_rings? */
-	index = ivshmem_config->pmd_rings_cnt - 1;
-	pmd_ring = &ivshmem_config->pmd_rings[index];
+	//index = ivshmem_config->pmd_rings_cnt - 1;
+	pmd_ring = &ivshmem_config->pmd_rings[0];
 
 	strcpy(name, pmd_ring->name);
 

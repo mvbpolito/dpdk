@@ -75,6 +75,7 @@ struct rte_ivshmem_metadata_pmd_ring {
 	//struct rte_ring *rx_queues[RTE_PMD_RING_MAX_RX_RINGS];
 	//struct rte_ring *tx_queues[RTE_PMD_RING_MAX_TX_RINGS];
 	struct pmd_internals *internals;	/**< queues, statistics and other stuff */
+	const struct rte_memzone *mz; /* memzone where internals is */
 };
 
 /**
