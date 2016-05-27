@@ -254,107 +254,6 @@ eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	return nb_rx;
 }
 
-//static void
-//close_secondary(uint8_t normal_id, uint8_t bypass_id)
-//{
-//	char name[50];		/*XXX: change 50 by a propper value */
-//
-//	struct rte_mbuf * temp[1024];
-//	uint16_t nb_rx;
-//
-//	struct rte_eth_dev * normal_port;
-//	struct pmd_internals * internals;
-//
-//	normal_port = &rte_eth_devices[normal_id];
-//	internals = normal_port->data->dev_private;
-//
-//	snprintf(name, sizeof(name), "temp%d", normal_id);
-//	internals->temp_ring = rte_ring_create(name, 1024, 0, 0);
-//	if(internals->temp_ring == NULL)
-//		return;
-//
-//	/* read packets into the temp ring */
-//	nb_rx = rte_eth_rx_burst(bypass_id, 0, temp, 1024);
-//	rte_ring_enqueue_bulk(internals->temp_ring, (void **) temp, nb_rx);
-//
-//	rte_eth_dev_stop(bypass_id);
-//	rte_eth_dev_close(bypass_id);
-//	rte_eth_dev_detach(bypass_id, name);
-//}
-
-//static uint16_t
-//eth_ring_tx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
-//{
-//	struct rx_ring_queue * tx_q = q;
-//	struct rte_eth_dev * normal_port;
-//
-//	normal_port = &rte_eth_devices[tx_q->normal_id];
-//
-//	/* now, the devices behaves in the standard way */
-//	normal_port->rx_pkt_burst = eth_ring_temp_rx;
-//	normal_port->tx_pkt_burst = eth_ring_normal_tx;
-//
-//	close_secondary(tx_q->normal_id, tx_q->bypass_id);
-//
-//	return eth_ring_normal_tx(q, bufs, nb_bufs);
-//}
-//
-//static uint16_t
-//eth_ring_rx_close(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
-//{
-//	struct rx_ring_queue * rx_q = q;
-//	struct rte_eth_dev * normal_port;
-//
-//	normal_port = &rte_eth_devices[rx_q->normal_id];
-//
-//	/* now, the devices behaves in the standard way */
-//	normal_port->rx_pkt_burst = eth_ring_temp_rx;
-//	normal_port->tx_pkt_burst = eth_ring_normal_tx;
-//
-//	close_secondary(rx_q->normal_id, rx_q->bypass_id);
-//
-//	return eth_ring_normal_rx(q, bufs, nb_bufs);
-//}
-
-
-
-/* this function reads packets from the temp ring until it gets empty, then that
- * happens the device starts reading the primary port
- */
-//static uint16_t
-//eth_ring_temp_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
-//{
-//	struct rx_ring_queue * rx_q = q;
-//	struct rte_eth_dev * normal_port;
-//	struct rte_ring * r;
-//	struct pmd_internals * internals;
-//
-//	void **ptrs = (void *)&bufs[0];
-//
-//	normal_port = &rte_eth_devices[rx_q->normal_id];
-//	internals = normal_port->data->dev_private;
-//	r = internals->temp_ring;
-//
-//	/* are there packets in the temporal ring? */
-//	if (rte_ring_count(r)) {
-//		const uint16_t nb_rx = (uint16_t)rte_ring_dequeue_burst(r,
-//			ptrs, nb_bufs);
-//
-//		rx_q->rx_pkts.cnt += nb_rx;
-//
-//		return nb_rx;
-//	}
-//
-//	rte_ring_free(r);
-//
-//	/* now, there are not more packets in the temporal ring, then the device
-//	 * behaves in the standard way
-//	 */
-//	normal_port->rx_pkt_burst = eth_ring_normal_rx;
-//
-//	return eth_ring_normal_rx(q, bufs, nb_bufs);
-//}
-
 /*
  * This function is used for a limited amount of time to read packets while
  * creating a direct path. The function does the following:
@@ -368,6 +267,8 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct rte_eth_dev * normal_port =
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
+
+	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
 
@@ -401,6 +302,8 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	struct rte_eth_dev * normal_port =
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
+
+	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	/*
 	 * if the bypass port has been close, read directly from the normal channel
@@ -459,14 +362,15 @@ close_bypass(void *arg)
 static uint16_t
 eth_ring_send_cap_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
+	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 	send_cap_normal(q);
-
 	return eth_ring_bypass_tx(q, bufs, nb_bufs);
 }
 
 static uint16_t
 eth_ring_send_cap_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
+	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 	send_cap_bypass(q);
 	return eth_ring_normal_tx(q, bufs, nb_bufs);
 }
