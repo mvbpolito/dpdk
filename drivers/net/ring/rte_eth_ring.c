@@ -373,11 +373,9 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 	for (i = 0; i < nb_rx; i++) {
 		if (buf_is_cap(bufs[i])) {
-			/*
-			 * this is very important, in the case the device is going to be
-			 * closed, send the cap in case it has not been sent
-			 */
-			//send_cap_normal(normal_port->data->tx_queues[0]);
+
+			RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
+
 			normal_port->rx_pkt_burst = eth_ring_bypass_rx;
 			nb_rx--;
 
@@ -425,11 +423,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	for (i = 0; i < nb_rx; i++) {
 		if (buf_is_cap(bufs[i])) {
 
-			/*
-			 * this is very important, in the case the device is going to be
-			 * closed, send the cap in case it has not been sent
-			 */
-			//send_cap_bypass(normal_port->data->tx_queues[0]);
+			RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
 
 			normal_port->rx_pkt_burst = eth_ring_normal_rx;
 			nb_rx--;
