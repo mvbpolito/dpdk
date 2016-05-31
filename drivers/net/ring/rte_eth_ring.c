@@ -228,6 +228,8 @@ eth_ring_bypass_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 	r->tx_pkts += nb_tx;
 	r->err_pkts += nb_bufs - nb_tx;
+	r->tx_pkts_bypass += nb_tx;
+	r->err_pkts_bypass += nb_bufs - nb_tx;
 
 	return nb_tx;
 }
@@ -250,6 +252,7 @@ eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	const uint16_t nb_rx = rte_eth_rx_burst(r->bypass_id, 0, bufs, nb_bufs);
 
 	r->rx_pkts += nb_rx;
+	r->rx_pkts_bypass += nb_rx;
 
 	return nb_rx;
 }
@@ -320,8 +323,6 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	 * the normal device
 	 */
 	uint16_t nb_rx = rte_eth_rx_burst(rx_q->bypass_id, 0, bufs, nb_bufs);
-
-	rx_q->rx_pkts += nb_rx;
 
 	for (i = 0; i < nb_rx; i++) {
 		if (buf_is_cap(bufs[i])) {
@@ -851,6 +852,7 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	}
 
 	rx_q->bypass_id = bypass_id;
+	rx_q->rx_pkts_bypass = 0;
 
 	/* Setup Tx Queues */
 	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
@@ -875,6 +877,8 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	}
 
 	tx_q->cap_sent = 0; /* no cap has been sent */
+	tx_q->tx_pkts_bypass = 0;
+	tx_q->err_pkts_bypass = 0;
 
 	/* this is used to guarantee that a cap packet is sent.
 	 * Note that this is useful when applications are doing other things than

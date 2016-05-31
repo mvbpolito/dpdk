@@ -44,9 +44,6 @@ extern "C" {
 
 /* XXX: there are some duplicated fields among these two structs */
 
-//struct rte_eth_rxconf;
-//struct rte_
-
 struct rx_ring_queue {
 	struct rte_ring *rng;
 	uint8_t normal_id;
@@ -60,6 +57,8 @@ struct rx_ring_queue {
 	/**< Reference to mbuf pool to use for RX queue */
 
 	uint64_t rx_pkts;
+	//uint64_t rx_bytes;
+	uint64_t rx_pkts_bypass; /* packets read from the bypass channel */
 };
 
 struct tx_ring_queue {
@@ -77,7 +76,10 @@ struct tx_ring_queue {
 	unsigned int cap_sent;	/* indicates if a cap has been sent using this queue*/
 
 	uint64_t tx_pkts;
+	//uint64_t tx_bytes;
 	uint64_t err_pkts;
+	uint64_t tx_pkts_bypass; /* packets sent over the bypass port */
+	uint64_t err_pkts_bypass;
 };
 
 enum port_mode_t {MODE_NORMAL, MODE_BYPASS, MODE_ERROR};
