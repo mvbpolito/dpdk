@@ -823,6 +823,9 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 		if (res->len == 0)
 			return 0;
 
+		RTE_LOG(INFO, EAL, "Found IVSHMEM device %02x:%02x.%x\n",
+				dev->addr.bus, dev->addr.devid, dev->addr.function);
+
 		/* construct pci device path */
 		snprintf(path, sizeof(path), IVSHMEM_RESOURCE_PATH,
 				dev->addr.domain, dev->addr.bus, dev->addr.devid,
@@ -885,9 +888,6 @@ ivshmem_probe_device(struct rte_pci_device * dev)
 			close(fd);
 			return -1;
 		}
-
-		RTE_LOG(INFO, EAL, "Found IVSHMEM device %02x:%02x.%x\n",
-				dev->addr.bus, dev->addr.devid, dev->addr.function);
 
 		/* close the BAR fd */
 		close(fd);
