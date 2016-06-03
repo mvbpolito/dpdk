@@ -40,9 +40,11 @@ extern "C" {
 
 #include <rte_ring.h>
 #include <rte_ethdev.h>
-#include <rte_spinlock.h>
 
 /* XXX: there are some duplicated fields among these two structs */
+
+enum tx_state {NORMAL_TX, CREATION_TX, BYPASS_TX, DESTRUCTION_TX};
+enum rx_state {NORMAL_RX, CREATION_RX, BYPASS_RX, DESTRUCTION_RX};
 
 struct rx_ring_queue {
 	struct rte_ring *rng;
@@ -55,6 +57,8 @@ struct rx_ring_queue {
 	/**< Copy of RX configuration structure for queue */
 	struct rte_mempool *mb_pool;
 	/**< Reference to mbuf pool to use for RX queue */
+
+	enum rx_state state;
 
 	uint64_t rx_pkts;
 	//uint64_t rx_bytes;
@@ -72,8 +76,7 @@ struct tx_ring_queue {
 	struct rte_eth_txconf tx_conf;
 	/**< Copy of TX configuration structure for queue */
 
-	rte_spinlock_t send_cap_lock;
-	unsigned int cap_sent;	/* indicates if a cap has been sent using this queue*/
+	enum tx_state state;
 
 	uint64_t tx_pkts;
 	//uint64_t tx_bytes;

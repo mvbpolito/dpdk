@@ -40,6 +40,7 @@
 #include <rte_dev.h>
 #include <rte_kvargs.h>
 #include <rte_errno.h>
+#include <rte_cycles.h>
 
 /* Following code probably only works with Linux */
 #include <unistd.h>
@@ -49,7 +50,7 @@
 #define ETH_RING_ACTION_ATTACH		"ATTACH"
 
 #define CAP_MAGIC ((void *)0x444e7834082c83a7)
-
+#define CAP_TSC (rte_get_tsc_hz()/10)	/* 100 ms XXX: value to tune */
 static const char *valid_arguments[] = {
 	ETH_RING_NUMA_NODE_ACTION_ARG,
 	NULL
@@ -81,9 +82,41 @@ static uint16_t eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_
 static uint16_t eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
 static uint16_t eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
 
-static uint16_t eth_ring_send_cap_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
-static uint16_t eth_ring_send_cap_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static uint16_t eth_ring_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static uint16_t eth_ring_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
 
+static uint16_t eth_ring_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+static uint16_t eth_ring_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs);
+
+static uint16_t
+eth_ring_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct rx_ring_queue *rx_q = q;
+
+	switch(rx_q->state) {
+	case NORMAL_RX:			return eth_ring_normal_rx(q, bufs, nb_bufs);
+	case CREATION_RX:		return eth_ring_creation_rx(q, bufs, nb_bufs);
+	case BYPASS_RX:			return eth_ring_bypass_rx(q, bufs, nb_bufs);
+	case DESTRUCTION_RX:	return eth_ring_destruction_rx(q, bufs, nb_bufs);
+	}
+
+	return 0;
+}
+
+static uint16_t
+eth_ring_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+{
+	struct tx_ring_queue *tx_q = q;
+
+	switch(tx_q->state) {
+	case NORMAL_TX:			return eth_ring_normal_tx(q, bufs, nb_bufs);
+	case CREATION_TX:		return eth_ring_creation_tx(q, bufs, nb_bufs);
+	case BYPASS_TX:			return eth_ring_bypass_tx(q, bufs, nb_bufs);
+	case DESTRUCTION_TX:	return eth_ring_destruction_tx(q, bufs, nb_bufs);
+	}
+
+	return 0;
+}
 
 /*
  * send a cap (special buffer that indicates that is the last)
@@ -92,17 +125,6 @@ static void
 send_cap_normal(void *q)
 {
 	struct tx_ring_queue *tx_q = q;
-
-	if (rte_spinlock_trylock(&tx_q->send_cap_lock) == 0)
-		return;
-
-	/* has a cap been already sent?*/
-	if(tx_q->cap_sent) {
-		rte_spinlock_unlock(&tx_q->send_cap_lock);
-		return;
-	}
-
-	tx_q->cap_sent = 1;
 
 	/* A horrible method to lock for the memory pool */
 	struct rte_eth_dev * normal_port =
@@ -130,29 +152,15 @@ send_cap_normal(void *q)
 		i += eth_ring_normal_tx(q, caps, ntosend - i);
 	} while(i < ntosend);
 
-	normal_port->tx_pkt_burst = eth_ring_bypass_tx;
+	tx_q->state = BYPASS_TX;
 
 	internals->mode = MODE_BYPASS;
-
-	rte_spinlock_unlock(&tx_q->send_cap_lock);
 }
 
 static void
 send_cap_bypass(void *q)
 {
 	struct tx_ring_queue *tx_q = q;
-
-
-	if (rte_spinlock_trylock(&tx_q->send_cap_lock) == 0)
-		return;
-
-	/* has a cap been already sent?*/
-	if(tx_q->cap_sent) {
-		rte_spinlock_unlock(&tx_q->send_cap_lock);
-		return;
-	}
-
-	tx_q->cap_sent = 1;
 
 	struct rte_eth_dev * normal_port =
 		normal_port = &rte_eth_devices[tx_q->normal_id];
@@ -180,11 +188,9 @@ send_cap_bypass(void *q)
 	} while(i < ntosend);
 
 
-	normal_port->tx_pkt_burst = eth_ring_normal_tx;
+	tx_q->state = NORMAL_TX;
 
 	internals->mode = MODE_NORMAL;
-
-	rte_spinlock_unlock(&tx_q->send_cap_lock);
 }
 
 /*
@@ -241,18 +247,18 @@ eth_ring_bypass_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 static uint16_t
 eth_ring_bypass_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
-	struct rx_ring_queue *r = q;
+	struct rx_ring_queue *rx_q = q;
 
 	/* XXX: in the case the read packets < nb_bufs, read remaining from secondary */
 	/* In the case there are packets in the auxiliar link */
-	if (unlikely(rte_ring_count(r->rng))) {
+	if (unlikely(rte_ring_count(rx_q->rng))) {
 		return eth_ring_normal_rx(q, bufs, nb_bufs);
 	}
 
-	const uint16_t nb_rx = rte_eth_rx_burst(r->bypass_id, 0, bufs, nb_bufs);
+	const uint16_t nb_rx = rte_eth_rx_burst(rx_q->bypass_id, 0, bufs, nb_bufs);
 
-	r->rx_pkts += nb_rx;
-	r->rx_pkts_bypass += nb_rx;
+	rx_q->rx_pkts += nb_rx;
+	rx_q->rx_pkts_bypass += nb_rx;
 
 	return nb_rx;
 }
@@ -271,24 +277,44 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
 
+	static int nlast = 0; /*number of received packets in last operation */
+	static uint64_t old = 0; /* time of the first failed read operation */
+
 	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
 
-	for (i = 0; i < nb_rx; i++) {
-		if (buf_is_cap(bufs[i])) {
+	if (nb_rx > 0) {
+		for (i = 0; i < nb_rx; i++) {
+			if (buf_is_cap(bufs[i])) {
 
-			RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
+				RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
 
-			normal_port->rx_pkt_burst = eth_ring_bypass_rx;
-			nb_rx--;
+				rx_q->state = BYPASS_RX;
+				nb_rx--;
 
-			/* XXX: remove and free the buffers that are still caps */
+				/* XXX: remove and free the buffers that are still caps */
 
-			break;
+				break;
+			}
+		}
+	} else {
+		if (nlast != 0) {
+			/* this is the first non succesful reading */
+			old = rte_get_timer_cycles();
+		} else {
+			/* last operation was also unsuccessful */
+			if ((rte_get_timer_cycles() - old) > CAP_TSC) {
+				/* the cap packet is taking so long for arrive, maybe it was
+				 * lost or the peer is not sending packets, anyway,
+				 * change to the next state
+				 */
+				 rx_q->state = BYPASS_RX;
+			}
 		}
 	}
 
+	nlast = nb_rx;
 	return nb_rx;
 }
 
@@ -308,6 +334,8 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
+	static int nlast = 0; /*number of received packets in last operation */
+	static uint64_t old = 0; /* time of the first failed read operation */
 	/*
 	 * if the bypass port has been close, read directly from the normal channel
 	 * XXX: add temporal buffer here!
@@ -315,28 +343,43 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 	struct pmd_internals *internals = normal_port->data->dev_private;
 	if (internals->bypass_state == BYPASS_DETACHED) {
-		normal_port->rx_pkt_burst = eth_ring_normal_rx;
+		rx_q->state = NORMAL_RX;
 		return eth_ring_normal_rx(q, bufs, nb_bufs);
 	}
 
-	/* we cannot use the eth_ring_bypass_rx here because it will also try to read
-	 * the normal device
-	 */
 	uint16_t nb_rx = rte_eth_rx_burst(rx_q->bypass_id, 0, bufs, nb_bufs);
 
-	for (i = 0; i < nb_rx; i++) {
-		if (buf_is_cap(bufs[i])) {
+	if (nb_rx > 0) {
+		for (i = 0; i < nb_rx; i++) {
+			if (buf_is_cap(bufs[i])) {
 
-			RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
+				RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
 
-			normal_port->rx_pkt_burst = eth_ring_normal_rx;
-			nb_rx--;
+				rx_q->state = NORMAL_RX;
+				nb_rx--;
 
-			/* XXX: remove and free the buffers that are still caps */
-			break;
+				/* XXX: remove and free the buffers that are still caps */
+
+				break;
+			}
+		}
+	} else {
+		if (nlast != 0) {
+			/* this is the first non succesful reading */
+			old = rte_get_timer_cycles();
+		} else {
+			/* last operation was also unsuccessful */
+			if ((rte_get_timer_cycles() - old) > CAP_TSC) {
+				/* the cap packet is taking so long for arrive, maybe it was
+				 * lost or the peer is not sending packets, anyway,
+				 * change to the next state
+				 */
+				 rx_q->state = BYPASS_RX;
+			}
 		}
 	}
 
+	nlast = nb_rx;
 	return nb_rx;
 }
 
@@ -361,7 +404,7 @@ close_bypass(void *arg)
  * operation
  */
 static uint16_t
-eth_ring_send_cap_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+eth_ring_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 	send_cap_normal(q);
@@ -369,7 +412,7 @@ eth_ring_send_cap_creation_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 }
 
 static uint16_t
-eth_ring_send_cap_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
+eth_ring_destruction_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 {
 	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 	send_cap_bypass(q);
@@ -661,7 +704,6 @@ rte_eth_from_rings(const char *name, struct rte_ring *const rx_queues[],
 	for (i = 0; i < nb_tx_queues; i++) {
 		internals->tx_ring_queues[i].rng = tx_queues[i];
 		data->tx_queues[i] = &internals->tx_ring_queues[i];
-		rte_spinlock_init(&internals->tx_ring_queues[i].send_cap_lock);
 	}
 
 	data->dev_private = internals;
@@ -685,8 +727,8 @@ rte_eth_from_rings(const char *name, struct rte_ring *const rx_queues[],
 	internals->mode = MODE_NORMAL;
 
 	/* finally assign rx and tx ops */
-	eth_dev->rx_pkt_burst = eth_ring_normal_rx;
-	eth_dev->tx_pkt_burst = eth_ring_normal_tx;
+	eth_dev->rx_pkt_burst = eth_ring_rx;
+	eth_dev->tx_pkt_burst = eth_ring_tx;
 
 	return data->port_id;
 
@@ -758,7 +800,6 @@ rte_eth_from_internals(char * name,
 	}
 	for (i = 0; i < internals->nb_tx_queues; i++) {
 		data->tx_queues[i] = &internals->tx_ring_queues[i];
-		rte_spinlock_init(&internals->tx_ring_queues[i].send_cap_lock);
 	}
 
 	data->dev_private = internals;
@@ -782,8 +823,8 @@ rte_eth_from_internals(char * name,
 	internals->mode = MODE_NORMAL;
 
 	/* finally assign rx and tx ops */
-	eth_dev->rx_pkt_burst = eth_ring_normal_rx;
-	eth_dev->tx_pkt_burst = eth_ring_normal_tx;
+	eth_dev->rx_pkt_burst = eth_ring_rx;
+	eth_dev->tx_pkt_burst = eth_ring_tx;
 
 	return data->port_id;
 
@@ -854,6 +895,9 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	rx_q->bypass_id = bypass_id;
 	rx_q->rx_pkts_bypass = 0;
 
+	/* look for cap packet */
+	rx_q->state = CREATION_RX;
+
 	/* Setup Tx Queues */
 	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
 	errval = rte_eth_tx_queue_setup(bypass_id, 0,
@@ -876,19 +920,8 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 		return -1;
 	}
 
-	tx_q->cap_sent = 0; /* no cap has been sent */
 	tx_q->tx_pkts_bypass = 0;
 	tx_q->err_pkts_bypass = 0;
-
-	/* this is used to guarantee that a cap packet is sent.
-	 * Note that this is useful when applications are doing other things than
-	 * sending traffic
-	 */
-	schedule_timeout(send_cap_normal, tx_q, 10000);
-
-	/* now the port behaves in a special way */
-	normal_port->rx_pkt_burst = eth_ring_creation_rx;
-	normal_port->tx_pkt_burst = eth_ring_send_cap_creation_tx;
 
 	return 0;
 }
@@ -896,7 +929,7 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 {
 	struct rte_eth_dev * normal_port;
-	struct tx_ring_queue *tx_q;
+	struct rx_ring_queue *rx_q;
 
 	if (!rte_eth_dev_is_valid_port(normal_id)) {
 		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", normal_id);
@@ -905,19 +938,11 @@ int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 
 	normal_port = &rte_eth_devices[normal_id];
 
-	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
-	tx_q->cap_sent = 0; /* no cap has been sent */
+	rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
+	/* look for cap packet */
+	rx_q->state = DESTRUCTION_RX;
 
-	/* this is used to guarantee that a cap packet is sent.
-	 * Note that this is useful when applications are doing other things than
-	 * sending traffic
-	 */
-	schedule_timeout(send_cap_bypass, tx_q, 10000);
 	schedule_timeout(close_bypass, normal_port->data->dev_private, 100000);
-
-	/* when called, close the secondary device */
-	normal_port->rx_pkt_burst = eth_ring_destruction_rx;
-	normal_port->tx_pkt_burst = eth_ring_send_cap_destruction_tx;
 
 	return 0;
 }
