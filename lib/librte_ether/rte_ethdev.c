@@ -3268,7 +3268,7 @@ rte_eth_copy_pci_info(struct rte_eth_dev *eth_dev, struct rte_pci_device *pci_de
 }
 
 int
-rte_eth_add_bypass_to_ring(const char * old, const char * new)
+rte_eth_add_bypass_to_ring(const char *old, const char *new, int attach)
 {
 	uint8_t old_portid, new_portid;
 	int ret;
@@ -3283,11 +3283,20 @@ rte_eth_add_bypass_to_ring(const char * old, const char * new)
 		return -1;
 	}
 
-	/* try to attach to new port */
-	ret = rte_eth_dev_attach(new, &new_portid);
-	if(ret < 0) {
-		RTE_PMD_DEBUG_TRACE("Failed to attach '%s'\n" , new);
-		return -1;
+	if (attach) {
+		/* try to attach to new port */
+		ret = rte_eth_dev_attach(new, &new_portid);
+		if(ret < 0) {
+			RTE_PMD_DEBUG_TRACE("Failed to attach '%s'\n" , new);
+			return -1;
+		}
+	} else {
+		struct rte_pci_addr addr;
+		if (eal_parse_pci_DomBDF(new, &addr) != 0)
+			return -1;
+
+		if (rte_eth_dev_get_port_by_addr(&addr, &new_portid) != 0)
+			return -1;
 	}
 
 	return rte_eth_ring_add_bypass_device(old_portid, new_portid);

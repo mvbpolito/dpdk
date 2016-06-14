@@ -3887,7 +3887,7 @@ rte_eth_dma_zone_reserve(const struct rte_eth_dev *eth_dev, const char *name,
 			 uint16_t queue_id, size_t size,
 			 unsigned align, int socket_id);
 
-int rte_eth_add_bypass_to_ring(const char * old, const char * new);
+int rte_eth_add_bypass_to_ring(const char *old, const char *new, int attach);
 int rte_eth_remove_bypass_from_ring(const char * id);
 
 #ifdef __cplusplus

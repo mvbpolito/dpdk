@@ -97,6 +97,9 @@ struct pmd_internals {
 
 	enum port_mode_t mode;
 	enum bypass_device_state_t bypass_state;
+
+	char bypass_dev[30]; /* pci address of the bypass dev if any */
+
 	struct ether_addr address;
 };
 

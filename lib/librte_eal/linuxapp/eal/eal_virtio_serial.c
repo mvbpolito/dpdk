@@ -82,7 +82,7 @@ process_host_request(char * buf, size_t len)
 		err = sscanf(strtok(NULL, ","), "new=%s", p_new);
 		if (err != 1)
 			goto error;
-		err = rte_eth_add_bypass_to_ring(p_old, p_new);
+		err = rte_eth_add_bypass_to_ring(p_old, p_new, 1);
 		if (err != 0)
 			goto error;
 	} else if (!strcmp(action, "del")) {

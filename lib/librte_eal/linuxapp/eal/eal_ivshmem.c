@@ -1017,8 +1017,7 @@ rte_eal_ivshmem_obj_init(void)
 	ivshmem_config->memzone_cnt = 0;
 
 	/* find pmd rings */
-	for(i = 0; i < ivshmem_config->pmd_rings_cnt; i++)
-	{
+	for (i = 0; i < ivshmem_config->pmd_rings_cnt; i++) {
 		pmd_ring = &ivshmem_config->pmd_rings[i];
 		ret = rte_eth_from_internals(pmd_ring->name,
 				pmd_ring->internals, pmd_ring->dev);
@@ -1026,6 +1025,18 @@ rte_eal_ivshmem_obj_init(void)
 		{
 			RTE_LOG(ERR, EAL, "Cannot create virtual ethernet device %s!\n",
 				pmd_ring->name);
+			return -1;
+		}
+	}
+
+	/* add bypass channels of pmd rings */
+	for (i = 0; i < ivshmem_config->pmd_rings_cnt; i++) {
+		pmd_ring = &ivshmem_config->pmd_rings[i];
+
+		ret = rte_eth_add_bypass_to_ring(pmd_ring->name,
+				pmd_ring->internals->bypass_dev, 0);
+		if (ret == -1) {
+			RTE_LOG(ERR, EAL, "Cannot add bypass device\n");
 			return -1;
 		}
 	}
