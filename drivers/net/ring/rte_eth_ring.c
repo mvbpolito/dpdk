@@ -881,7 +881,7 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	//}
     //
 	///* Setup Rx Queues */
-	//rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
+	rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
 	//errval = rte_eth_rx_queue_setup(bypass_id, 0,
 	//			rx_q->nb_rx_desc,
 	//			rte_eth_dev_socket_id(bypass_id),
@@ -899,7 +899,7 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	rx_q->state = CREATION_RX;
 
 	///* Setup Tx Queues */
-	//tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
+	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
 	//errval = rte_eth_tx_queue_setup(bypass_id, 0,
 	//			tx_q->nb_tx_desc,
 	//			rte_eth_dev_socket_id(bypass_id),
