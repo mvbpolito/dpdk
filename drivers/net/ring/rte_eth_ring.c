@@ -851,7 +851,7 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	struct pmd_internals *internals;
 	struct rx_ring_queue *rx_q;
 	struct tx_ring_queue *tx_q;
-	int errval;
+	//int errval;
 
 	if (!rte_eth_dev_is_valid_port(normal_id)) {
 		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", normal_id);
@@ -863,34 +863,34 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 		return -1;
 	}
 
-	rte_eth_dev_stop(bypass_id);
+	//rte_eth_dev_stop(bypass_id);
 
 	normal_port = &rte_eth_devices[normal_id];
 
 	internals = normal_port->data->dev_private;
 	internals->bypass_state = BYPASS_ATTACHED; /* bypass is being used */
 
-	/* Setup device */
-	/* TODO: multiqueue support  */
-	errval = rte_eth_dev_configure(bypass_id, 1, 1,
-			  &(normal_port->data->dev_conf));
-	if (errval != 0) {
-		RTE_LOG(ERR, PMD, "Cannot configure slave device: port %u , err (%d)",
-				bypass_id, errval);
-		return errval;
-	}
-
-	/* Setup Rx Queues */
-	rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
-	errval = rte_eth_rx_queue_setup(bypass_id, 0,
-				rx_q->nb_rx_desc,
-				rte_eth_dev_socket_id(bypass_id),
-				&(rx_q->rx_conf), rx_q->mb_pool);
-	if (errval != 0) {
-		RTE_LOG(ERR, PMD, "rte_eth_rx_queue_setup: port=%d queue_id %d, err (%d)",
-			bypass_id, 0, errval);
-		return errval;
-	}
+	///* Setup device */
+	///* TODO: multiqueue support  */
+	//errval = rte_eth_dev_configure(bypass_id, 1, 1,
+	//		  &(normal_port->data->dev_conf));
+	//if (errval != 0) {
+	//	RTE_LOG(ERR, PMD, "Cannot configure slave device: port %u , err (%d)",
+	//			bypass_id, errval);
+	//	return errval;
+	//}
+    //
+	///* Setup Rx Queues */
+	//rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
+	//errval = rte_eth_rx_queue_setup(bypass_id, 0,
+	//			rx_q->nb_rx_desc,
+	//			rte_eth_dev_socket_id(bypass_id),
+	//			&(rx_q->rx_conf), rx_q->mb_pool);
+	//if (errval != 0) {
+	//	RTE_LOG(ERR, PMD, "rte_eth_rx_queue_setup: port=%d queue_id %d, err (%d)",
+	//		bypass_id, 0, errval);
+	//	return errval;
+	//}
 
 	rx_q->bypass_id = bypass_id;
 	rx_q->rx_pkts_bypass = 0;
@@ -898,27 +898,27 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	/* look for cap packet */
 	rx_q->state = CREATION_RX;
 
-	/* Setup Tx Queues */
-	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
-	errval = rte_eth_tx_queue_setup(bypass_id, 0,
-				tx_q->nb_tx_desc,
-				rte_eth_dev_socket_id(bypass_id),
-				&tx_q->tx_conf);
-	if (errval != 0) {
-		RTE_LOG(ERR, PMD, "rte_eth_tx_queue_setup: port=%d queue_id %d, err (%d)",
-				bypass_id, 0, errval);
-		return errval;
-	}
+	///* Setup Tx Queues */
+	//tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
+	//errval = rte_eth_tx_queue_setup(bypass_id, 0,
+	//			tx_q->nb_tx_desc,
+	//			rte_eth_dev_socket_id(bypass_id),
+	//			&tx_q->tx_conf);
+	//if (errval != 0) {
+	//	RTE_LOG(ERR, PMD, "rte_eth_tx_queue_setup: port=%d queue_id %d, err (%d)",
+	//			bypass_id, 0, errval);
+	//	return errval;
+	//}
 
 	tx_q->bypass_id = bypass_id;
 
-	/* Start device */
-	errval = rte_eth_dev_start(bypass_id);
-	if (errval != 0) {
-		RTE_LOG(ERR, PMD, "rte_eth_dev_start: port=%u, err (%d)",
-				bypass_id, errval);
-		return -1;
-	}
+	///* Start device */
+	//errval = rte_eth_dev_start(bypass_id);
+	//if (errval != 0) {
+	//	RTE_LOG(ERR, PMD, "rte_eth_dev_start: port=%u, err (%d)",
+	//			bypass_id, errval);
+	//	return -1;
+	//}
 
 	tx_q->tx_pkts_bypass = 0;
 	tx_q->err_pkts_bypass = 0;
