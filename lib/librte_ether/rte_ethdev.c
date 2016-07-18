@@ -3319,3 +3319,15 @@ rte_eth_remove_bypass_from_ring(const char * id)
 
 	return rte_eth_ring_remove_bypass_device(old_portid);
 }
+
+int
+rte_eth_set_default_pool(uint8_t port_id, uint8_t default_pool)
+{
+	struct rte_eth_dev *dev;
+
+	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	dev = &rte_eth_devices[port_id];
+	RTE_FUNC_PTR_OR_ERR_RET(*dev->dev_ops->set_default_pool, -ENOTSUP);
+	return (*dev->dev_ops->set_default_pool)(dev, default_pool);
+}

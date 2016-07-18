@@ -1261,6 +1261,10 @@ typedef int (*eth_set_eeprom_t)(struct rte_eth_dev *dev,
 				struct rte_dev_eeprom_info *info);
 /**< @internal Program eeprom data  */
 
+typedef int (*eth_set_default_pool_t)(struct rte_eth_dev *dev,
+				uint8_t default_pool);
+/**< @internal Set default pool */
+
 #ifdef RTE_NIC_BYPASS
 
 enum {
@@ -1402,6 +1406,8 @@ struct eth_dev_ops {
 	/**< Get eeprom data */
 	eth_set_eeprom_t set_eeprom;
 	/**< Set eeprom */
+	eth_set_default_pool_t set_default_pool;
+
   /* bypass control */
 #ifdef RTE_NIC_BYPASS
   bypass_init_t bypass_init;
@@ -3889,6 +3895,8 @@ rte_eth_dma_zone_reserve(const struct rte_eth_dev *eth_dev, const char *name,
 
 int rte_eth_add_bypass_to_ring(const char *old, const char *new, int attach);
 int rte_eth_remove_bypass_from_ring(const char * id);
+int rte_eth_set_default_pool(uint8_t port_id, uint8_t default_pool);
+
 
 #ifdef __cplusplus
 }

@@ -338,6 +338,8 @@ static int ixgbe_timesync_read_time(struct rte_eth_dev *dev,
 static int ixgbe_timesync_write_time(struct rte_eth_dev *dev,
 				   const struct timespec *timestamp);
 
+static int ixgbe_set_default_pool(struct rte_eth_dev *dev, uint8_t default_pool);
+
 /*
  * Define VF Stats MACRO for Non "cleared on read" register
  */
@@ -495,6 +497,7 @@ static const struct eth_dev_ops ixgbe_eth_dev_ops = {
 	.timesync_adjust_time = ixgbe_timesync_adjust_time,
 	.timesync_read_time   = ixgbe_timesync_read_time,
 	.timesync_write_time  = ixgbe_timesync_write_time,
+	.set_default_pool     = ixgbe_set_default_pool,
 };
 
 /*
@@ -6188,6 +6191,23 @@ ixgbe_dev_get_dcb_info(struct rte_eth_dev *dev,
 		tc = &dcb_config->tc_config[i];
 		dcb_info->tc_bws[i] = tc->path[IXGBE_DCB_TX_CONFIG].bwg_percent;
 	}
+	return 0;
+}
+
+static int ixgbe_set_default_pool(struct rte_eth_dev *dev, uint8_t default_pool)
+{
+	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t vtctl;
+
+	vtctl = IXGBE_READ_REG(hw, IXGBE_VT_CTL);
+	vtctl |= IXGBE_VMD_CTL_VMDQ_EN;
+	vtctl &= ~IXGBE_VT_CTL_POOL_MASK;
+	vtctl &= ~IXGBE_VT_CTL_REPLEN;
+	/* explicitely disable replication to allow multicast packets being forwarded
+	 * to the default pool */
+	vtctl |= default_pool << IXGBE_VT_CTL_POOL_SHIFT;
+	IXGBE_WRITE_REG(hw, IXGBE_VT_CTL, vtctl);
+
 	return 0;
 }
 
