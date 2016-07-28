@@ -330,15 +330,14 @@ rte_eal_pci_probe_one(const struct rte_pci_addr *addr)
 	if (addr == NULL)
 		return -1;
 
-	TAILQ_FOREACH(dev, &pci_device_list, next) {
-		if (rte_eal_compare_pci_addr(&dev->addr, addr))
-			continue;
+	dev = rte_eal_pci_scan_device_address(addr);
 
-		ret = pci_probe_all_drivers(dev);
-		if (ret < 0)
-			goto err_return;
-		return 0;
-	}
+	ret = pci_probe_all_drivers(dev);
+	if (ret < 0)
+		goto err_return;
+	return 0;
+
+	RTE_LOG(ERR, EAL, "%s(): Device not found in list\n", __FUNCTION__);
 	return -1;
 
 err_return:

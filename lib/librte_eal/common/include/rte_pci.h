@@ -358,6 +358,9 @@ int rte_eal_pci_scan(void);
 struct rte_pci_device *
 rte_eal_pci_scan_device(const char *device);
 
+struct rte_pci_device *
+rte_eal_pci_scan_device_address(const struct rte_pci_addr *addr);
+
 /**
  * Probe the PCI bus for registered drivers.
  *

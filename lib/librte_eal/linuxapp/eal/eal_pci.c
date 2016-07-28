@@ -424,6 +424,16 @@ error:
 	return 0;
 }
 
+struct rte_pci_device *
+rte_eal_pci_scan_device_address(const struct rte_pci_addr *addr)
+{
+	char device[50];
+	snprintf(device, sizeof(device), PCI_PRI_FMT,
+		addr->domain, addr->bus, addr->devid, addr->function);
+
+	return rte_eal_pci_scan_device(device);
+}
+
 /*
  * Scan the content of the PCI bus, and the devices in the devices
  * list
