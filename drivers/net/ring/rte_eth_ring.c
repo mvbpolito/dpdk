@@ -391,11 +391,11 @@ close_bypass(void *arg)
 	uint8_t bypass_id = internals->rx_ring_queues[0].bypass_id;
 
 	/* XXX: read packets into temporal buffer */
+	internals->bypass_state = BYPASS_DETACHED;
+
 	rte_eth_dev_stop(bypass_id);
 	rte_eth_dev_close(bypass_id);
 	rte_eth_dev_detach(bypass_id, name);
-
-	internals->bypass_state = BYPASS_DETACHED;
 }
 
 /*
@@ -895,9 +895,6 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	rx_q->bypass_id = bypass_id;
 	rx_q->rx_pkts_bypass = 0;
 
-	/* look for cap packet */
-	rx_q->state = CREATION_RX;
-
 	/* Setup Tx Queues */
 	tx_q = (struct tx_ring_queue *)normal_port->data->tx_queues[0];
 	errval = rte_eth_tx_queue_setup(bypass_id, 0,
@@ -919,6 +916,9 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 				bypass_id, errval);
 		return -1;
 	}
+
+	/* look for cap packet */
+	rx_q->state = CREATION_RX;
 
 	tx_q->tx_pkts_bypass = 0;
 	tx_q->err_pkts_bypass = 0;
