@@ -13,7 +13,10 @@
 
 #define VIRTIO_SERIAL_PATH "/dev/virtio-ports/dpdk"
 
-struct pollfd pollfds;
+struct virtio_args {
+	int fd; /* file descriptor */
+
+};
 
 static ssize_t safewrite(int fd, const char *buf, size_t count, int eagain_ret)
 {
@@ -105,66 +108,54 @@ error:
 	return -1;
 }
 
-static void
-rte_virtio_serial_sigio_handler(int signal)
+static void *
+rte_virtio_serial_handler(void *args_)
 {
-	(void) signal;
+	struct virtio_args *args = (struct virtio_args *) args_;
 
 	int ret;
 	char buf[512] = {0};
 
-	sigset_t mask;
-	sigset_t orig_mask;
-
-	sigemptyset (&mask);
-	sigaddset (&mask, SIGIO);
-
-	if (sigprocmask(SIG_BLOCK, &mask, &orig_mask) < 0) {
-			RTE_LOG(ERR, EAL, "Cannot sigprocmask");
-			return;
-	}
-
 	char * buf_ptr = &buf[0];
 	int n = 0;
 
-	ret = read(pollfds.fd, buf, sizeof(buf));
-	if (ret == -1) {
-		/* I think logging from an interrupt is not safe */
-		RTE_LOG(ERR, EAL, "Failed to read from device\n");
-		return;
-	}
+	for (;;) {
+		ret = read(args->fd, buf, sizeof(buf));
+		if (ret == -1) {
+			RTE_LOG(ERR, EAL, "Failed to read from virtio device\n");
+			continue;
+		}
 
-	buf_ptr += ret;
-	n += ret;
+		buf_ptr += ret;
+		n += ret;
 
-	if (n > 0) {
-		ret = process_host_request(buf, n);
-		if (ret == 0) {
-			char ok[] = "OK";
-			ret = safewrite(pollfds.fd, ok, sizeof(ok), 0);
-			if(ret != sizeof(ok)) {
-				RTE_LOG(ERR, EAL, "Fail to write ok virtio-serial\n");
-			}
-		} else {
-			char nok[] = "NOK";
-			ret = safewrite(pollfds.fd, nok, sizeof(nok), 0);
-			if(ret != sizeof(nok)) {
-				RTE_LOG(ERR, EAL, "Fail to write ok virtio-serial\n");
+		if (n > 0) {
+			ret = process_host_request(buf, n);
+			if (ret == 0) {
+				char ok[] = "OK";
+				ret = safewrite(args->fd, ok, sizeof(ok), 0);
+				if(ret != sizeof(ok)) {
+					RTE_LOG(ERR, EAL, "Fail to write ok virtio-serial\n");
+				}
+			} else {
+				char nok[] = "NOK";
+				ret = safewrite(args->fd, nok, sizeof(nok), 0);
+				if(ret != sizeof(nok)) {
+					RTE_LOG(ERR, EAL, "Fail to write ok virtio-serial\n");
+				}
 			}
 		}
 	}
-	if (sigprocmask(SIG_SETMASK, &orig_mask, NULL) < 0) {
-			RTE_LOG(ERR, EAL, "Cannot sigprocmask");
-			return;
-	}
 
+	return NULL;
 }
 
 int rte_eal_virtio_init(void)
 {
 	int fd;
-	int ret;
-	struct sigaction action;
+
+	pthread_t tid;
+	pthread_attr_t attr;
 
 	/* open device and configure it as async */
 	fd = open(VIRTIO_SERIAL_PATH, O_RDWR);
@@ -174,39 +165,12 @@ int rte_eal_virtio_init(void)
 		return -1;
 	}
 
-	pollfds.fd = fd;
-	pollfds.events = POLLIN;
+	struct virtio_args *args = malloc(sizeof(*args));
+	args->fd = fd;
 
-	ret = fcntl(fd, F_SETOWN, getpid());
-	if (ret < 0)
-	{
-		RTE_LOG(ERR, EAL, "Failed to fcntl F_SETOWN\n");
-		return -1;
-	}
-	ret = fcntl(fd, F_GETFL);
-	ret = fcntl(fd, F_SETFL, ret | O_ASYNC | O_NONBLOCK);
-	if (ret < 0)
-	{
-		RTE_LOG(ERR, EAL, "Failed to fcntl O_ASYNC\n");
-		return -1;
-	}
+	pthread_attr_init(&attr);
 
-	/* install signal handler that will be called when data arrives */
-	action.sa_handler = rte_virtio_serial_sigio_handler;
-	action.sa_flags = 0;
-	ret = sigemptyset(&action.sa_mask);
-	if (ret)
-	{
-		RTE_LOG(ERR, EAL, "Failed to sigemptyset\n");
-		return -1;
-	}
-
-	ret = sigaction(SIGIO, &action, NULL);
-	if (ret)
-	{
-		RTE_LOG(ERR, EAL, "Failed to sigaction\n");
-		ret = -errno;
-	}
+	pthread_create(&tid, &attr, rte_virtio_serial_handler, (void *)args);
 
 	return 0;
 }
