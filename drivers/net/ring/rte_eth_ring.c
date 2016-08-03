@@ -50,7 +50,7 @@
 #define ETH_RING_ACTION_ATTACH		"ATTACH"
 
 #define CAP_MAGIC ((void *)0x444e7834082c83a7)
-#define CAP_TSC (rte_get_tsc_hz()/10)	/* 100 ms XXX: value to tune */
+#define CAP_TSC (rte_get_tsc_hz()/100)	/* 10 ms XXX: value to tune */
 static const char *valid_arguments[] = {
 	ETH_RING_NUMA_NODE_ACTION_ARG,
 	NULL
@@ -868,7 +868,6 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	normal_port = &rte_eth_devices[normal_id];
 
 	internals = normal_port->data->dev_private;
-	internals->bypass_state = BYPASS_ATTACHED; /* bypass is being used */
 
 	/* Setup device */
 	/* TODO: multiqueue support  */
@@ -916,6 +915,8 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 				bypass_id, errval);
 		return -1;
 	}
+
+	internals->bypass_state = BYPASS_ATTACHED; /* bypass is being used */
 
 	/* look for cap packet */
 	rx_q->state = CREATION_RX;
