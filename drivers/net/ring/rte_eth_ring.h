@@ -86,7 +86,7 @@ struct tx_ring_queue {
 };
 
 enum port_mode_t {MODE_NORMAL, MODE_BYPASS, MODE_ERROR};
-enum bypass_device_state_t {BYPASS_DETACHED, BYPASS_ATTACHED};
+enum bypass_device_state_t {BYPASS_DETACHED, BYPASS_ATTACHED, BYPASS_DETACHING};
 
 struct pmd_internals {
 	unsigned nb_rx_queues;
