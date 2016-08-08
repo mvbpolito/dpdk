@@ -336,13 +336,14 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 
 	static int nlast = 0; /*number of received packets in last operation */
 	static uint64_t old = 0; /* time of the first failed read operation */
+
 	/*
-	 * if the bypass port has been close, read directly from the normal channel
+	 * If the bypass port is not attached, read from the normal channel
 	 * XXX: add temporal buffer here!
 	 */
 
 	struct pmd_internals *internals = normal_port->data->dev_private;
-	if (internals->bypass_state == BYPASS_DETACHED) {
+	if (internals->bypass_state != BYPASS_ATTACHED) {
 		rx_q->state = NORMAL_RX;
 		return eth_ring_normal_rx(q, bufs, nb_bufs);
 	}
@@ -391,10 +392,13 @@ close_bypass(void *arg)
 	uint8_t bypass_id = internals->rx_ring_queues[0].bypass_id;
 
 	/* XXX: read packets into temporal buffer */
+	internals->bypass_state = BYPASS_DETACHING;
+
 	rte_eth_dev_stop(bypass_id);
 	rte_eth_dev_close(bypass_id);
 	rte_eth_dev_detach(bypass_id, name);
 
+	/* indicate that is is safe to remove this device */
 	internals->bypass_state = BYPASS_DETACHED;
 }
 
