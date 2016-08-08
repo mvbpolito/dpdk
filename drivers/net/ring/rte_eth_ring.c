@@ -280,7 +280,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	static int nlast = 0; /*number of received packets in last operation */
 	static uint64_t old = 0; /* time of the first failed read operation */
 
-	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
+//	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
 
