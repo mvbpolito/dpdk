@@ -375,7 +375,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 				 * lost or the peer is not sending packets, anyway,
 				 * change to the next state
 				 */
-				 rx_q->state = BYPASS_RX;
+				 rx_q->state = NORMAL_RX;
 			}
 		}
 	}
