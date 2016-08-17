@@ -5,6 +5,7 @@
 #include <poll.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 
 #include <rte_log.h>
 #include <rte_ethdev.h>
@@ -15,7 +16,7 @@
 
 struct virtio_args {
 	int fd; /* file descriptor */
-
+	int once; /* read file descriptor until it becomes emtpy */
 };
 
 static ssize_t safewrite(int fd, const char *buf, size_t count, int eagain_ret)
@@ -120,6 +121,18 @@ rte_virtio_serial_handler(void *args_)
 	int n = 0;
 
 	for (;;) {
+
+		if (args->once) {
+			int available = 0;
+			if (ioctl(args->fd, FIONREAD, &available) < 0) {
+				RTE_LOG(ERR, EAL, "Cannot get available bytes in device\n");
+				return NULL;
+			}
+
+			if (available == 0)
+				return NULL;
+		}
+
 		ret = read(args->fd, buf, sizeof(buf));
 		if (ret == -1) {
 			RTE_LOG(ERR, EAL, "Failed to read from virtio device\n");
@@ -167,6 +180,12 @@ int rte_eal_virtio_init(void)
 
 	struct virtio_args *args = malloc(sizeof(*args));
 	args->fd = fd;
+	args->once = 1;
+
+	/* process the requests that are pending*/
+	rte_virtio_serial_handler(args);
+
+	args->once = 0;
 
 	pthread_attr_init(&attr);
 
