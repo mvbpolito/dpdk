@@ -1029,7 +1029,28 @@ rte_eal_ivshmem_obj_init(void)
 		}
 	}
 
-	/* add bypass channels of pmd rings */
+	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
+
+#ifdef RTE_LIBRTE_IVSHMEM_DEBUG
+	rte_memzone_dump(stdout);
+	rte_ring_list_dump(stdout);
+#endif
+
+	return 0;
+}
+
+int
+rte_eal_ivshmem_bypass_init(void)
+{
+	struct rte_ivshmem_metadata_pmd_ring *pmd_ring;
+	int ret;
+	unsigned int i;
+
+	/* It has nothing to do in secondary processes */
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY || ivshmem_config == NULL)
+		return 0;
+
+		/* add bypass channels of pmd rings */
 	for (i = 0; i < ivshmem_config->pmd_rings_cnt; i++) {
 		pmd_ring = &ivshmem_config->pmd_rings[i];
 
@@ -1046,13 +1067,6 @@ rte_eal_ivshmem_obj_init(void)
 
 	/* the pmd rings were created */
 	ivshmem_config->pmd_rings_cnt = 0;
-
-	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
-
-#ifdef RTE_LIBRTE_IVSHMEM_DEBUG
-	rte_memzone_dump(stdout);
-	rte_ring_list_dump(stdout);
-#endif
 
 	return 0;
 }
