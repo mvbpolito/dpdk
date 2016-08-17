@@ -16,7 +16,6 @@
 
 struct virtio_args {
 	int fd; /* file descriptor */
-	int once; /* read file descriptor until it becomes emtpy */
 };
 
 static ssize_t safewrite(int fd, const char *buf, size_t count, int eagain_ret)
@@ -56,7 +55,7 @@ static ssize_t safewrite(int fd, const char *buf, size_t count, int eagain_ret)
 }
 
 static int
-process_host_request(char * buf, size_t len, int once)
+process_host_request(char * buf, size_t len)
 {
 	char action[20] = {0};
 	char p_old[RTE_ETH_NAME_MAX_LEN] = {0};
@@ -65,10 +64,6 @@ process_host_request(char * buf, size_t len, int once)
 	char * str;
 	if (len <= 0)
 		return -1;
-
-	/* if once is one it means that this function is being called during init,
-	 * then devices should not be hot plugged */
-	int attach = once == 1 ? 0 : 1;
 
 	str = strtok(buf, ",");
 	if (str == NULL)
@@ -90,7 +85,7 @@ process_host_request(char * buf, size_t len, int once)
 		err = sscanf(strtok(NULL, ","), "new=%s", p_new);
 		if (err != 1)
 			goto error;
-		err = rte_eth_add_bypass_to_ring(p_old, p_new, attach);
+		err = rte_eth_add_bypass_to_ring(p_old, p_new, 1);
 		if (err != 0)
 			goto error;
 	} else if (!strcmp(action, "del")) {
@@ -125,24 +120,6 @@ rte_virtio_serial_handler(void *args_)
 	int n = 0;
 
 	for (;;) {
-		if (args->once) {
-			fd_set set;
-			struct timeval tv;
-			FD_ZERO(&set);
-			FD_SET(args->fd, &set);
-
-			tv.tv_usec = 0;
-			tv.tv_sec = 0;
-
-			ret = select(1, &set, NULL, NULL, &tv);
-			if (ret == -1) {
-				RTE_LOG(ERR, EAL, "select() failed in virtio device\n");
-				return NULL;
-			} else if (ret == 0) {
-				return NULL;
-			}
-		}
-
 		ret = read(args->fd, buf, sizeof(buf));
 		if (ret == -1) {
 			RTE_LOG(ERR, EAL, "Failed to read from virtio device\n");
@@ -153,7 +130,7 @@ rte_virtio_serial_handler(void *args_)
 		n += ret;
 
 		if (n > 0) {
-			ret = process_host_request(buf, n, args->once);
+			ret = process_host_request(buf, n);
 			if (ret == 0) {
 				char ok[] = "OK";
 				ret = safewrite(args->fd, ok, sizeof(ok), 0);
@@ -188,15 +165,35 @@ int rte_eal_virtio_init(void)
 		return -1;
 	}
 
+	/* read all the data that is in the device and thow it away */
+	for(;;) {
+		fd_set set;
+		struct timeval tv;
+		FD_ZERO(&set);
+		FD_SET(fd, &set);
+		char buf[512] = {0};
+		int ret;
+
+		tv.tv_usec = 0;
+		tv.tv_sec = 0;
+
+		ret = select(1, &set, NULL, NULL, &tv);
+		if (ret == -1) {
+			RTE_LOG(ERR, EAL, "select() failed in virtio device\n");
+			break;
+		} else if (ret == 0) {
+			break;
+		}
+
+		ret = read(fd, buf, sizeof(buf));
+		if (ret == -1) {
+			RTE_LOG(ERR, EAL, "Failed to read from virtio device\n");
+			break;
+		}
+	}
+
 	struct virtio_args *args = malloc(sizeof(*args));
 	args->fd = fd;
-	args->once = 1;
-
-	/* process the requests that are pending*/
-	rte_virtio_serial_handler(args);
-
-	args->once = 0;
-
 	pthread_attr_init(&attr);
 
 	pthread_create(&tid, &attr, rte_virtio_serial_handler, (void *)args);

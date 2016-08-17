@@ -802,11 +802,6 @@ rte_eal_init(int argc, char **argv)
 	if (rte_eal_tailqs_init() < 0)
 		rte_panic("Cannot init tail queues for objects\n");
 
-#ifdef RTE_LIBRTE_IVSHMEM
-	if (rte_eal_ivshmem_obj_init() < 0)
-		rte_panic("Cannot init IVSHMEM objects\n");
-#endif
-
 	if (rte_eal_log_init(logid, internal_config.syslog_facility) < 0)
 		rte_panic("Cannot init logs\n");
 
@@ -876,6 +871,11 @@ rte_eal_init(int argc, char **argv)
 	/* Probe & Initialize PCI devices */
 	if (rte_eal_pci_probe())
 		rte_panic("Cannot probe PCI\n");
+
+#ifdef RTE_LIBRTE_IVSHMEM
+	if (rte_eal_ivshmem_obj_init() < 0)
+		rte_panic("Cannot init IVSHMEM objects\n");
+#endif
 
 #ifdef RTE_LIBRTE_VIRTIO_SERIAL
 	rte_eal_virtio_init();
