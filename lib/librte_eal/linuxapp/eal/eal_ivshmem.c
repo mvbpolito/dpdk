@@ -1029,21 +1029,6 @@ rte_eal_ivshmem_obj_init(void)
 		}
 	}
 
-	/* add bypass channels of pmd rings */
-	for (i = 0; i < ivshmem_config->pmd_rings_cnt; i++) {
-		pmd_ring = &ivshmem_config->pmd_rings[i];
-
-		if (pmd_ring->internals->bypass_dev[0] == 0)
-			continue;
-
-		ret = rte_eth_add_bypass_to_ring(pmd_ring->name,
-				pmd_ring->internals->bypass_dev, 0);
-		if (ret == -1) {
-			RTE_LOG(ERR, EAL, "Cannot add bypass device\n");
-			return -1;
-		}
-	}
-
 	/* the pmd rings were created */
 	ivshmem_config->pmd_rings_cnt = 0;
 
