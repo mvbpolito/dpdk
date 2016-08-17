@@ -877,11 +877,6 @@ rte_eal_init(int argc, char **argv)
 	if (rte_eal_pci_probe())
 		rte_panic("Cannot probe PCI\n");
 
-#ifdef RTE_LIBRTE_IVSHMEM
-	if (rte_eal_ivshmem_bypass_init() < 0)
-		rte_panic("Cannot init bypass devices\n");
-#endif
-
 #ifdef RTE_LIBRTE_VIRTIO_SERIAL
 	rte_eal_virtio_init();
 #endif

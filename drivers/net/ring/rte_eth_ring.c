@@ -469,6 +469,16 @@ eth_dev_configure(struct rte_eth_dev *dev __rte_unused) { return 0; }
 static int
 eth_dev_start(struct rte_eth_dev *dev)
 {
+	int ret;
+	struct pmd_internals *internals = dev->data->dev_private;
+	if (internals->bypass_dev[0] != '\0') {
+		ret = rte_eth_add_bypass_to_ring(dev->data->name, internals->bypass_dev, 0);
+		if (ret == -1) {
+			RTE_LOG(ERR, EAL, "Cannot add bypass device\n");
+			return -1;
+		}
+	}
+
 	dev->data->dev_link.link_status = 1;
 	return 0;
 }

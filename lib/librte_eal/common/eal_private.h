@@ -150,11 +150,6 @@ int rte_eal_ivshmem_init(void);
  */
 int rte_eal_ivshmem_obj_init(void);
 
-/**
- * TODO: Write documentation
- */
-int rte_eal_ivshmem_bypass_init(void);
-
 #endif
 
 #ifdef RTE_LIBRTE_VIRTIO_SERIAL
