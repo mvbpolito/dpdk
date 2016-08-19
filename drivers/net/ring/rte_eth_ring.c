@@ -169,6 +169,12 @@ send_cap_bypass(void *q)
 
 	struct rte_mbuf *caps[5] = {0};
 
+	if (internals->bypass_state != BYPASS_ATTACHED) {
+		tx_q->state = NORMAL_TX;
+		internals->mode = MODE_NORMAL;
+		return;
+	}
+
 	int ret, i, ntosend;
 	do {
 		ret = rte_mempool_get_bulk(mb_pool, (void **) caps, 5);
