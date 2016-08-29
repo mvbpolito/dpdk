@@ -177,7 +177,7 @@ int rte_eal_virtio_init(void)
 		tv.tv_usec = 0;
 		tv.tv_sec = 0;
 
-		ret = select(1, &set, NULL, NULL, &tv);
+		ret = select(fd + 1, &set, NULL, NULL, &tv);
 		if (ret == -1) {
 			RTE_LOG(ERR, EAL, "select() failed in virtio device\n");
 			break;
