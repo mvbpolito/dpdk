@@ -18,6 +18,20 @@ struct virtio_args {
 	int fd; /* file descriptor */
 };
 
+static int safepoll(struct pollfd *fds, nfds_t nfds, int timeout)
+{
+	int ret;
+
+	do {
+		ret = poll(fds, nfds, timeout);
+	} while (ret == -1 && errno == EINTR);
+
+	if (ret == -1)
+		ret = -errno;
+
+	return ret;
+}
+
 static ssize_t safewrite(int fd, const char *buf, size_t count, int eagain_ret)
 {
 	ssize_t ret, len;
@@ -167,17 +181,14 @@ int rte_eal_virtio_init(void)
 
 	/* read all the data that is in the device and thow it away */
 	for(;;) {
-		fd_set set;
-		struct timeval tv;
-		FD_ZERO(&set);
-		FD_SET(fd, &set);
+		struct pollfd fds;
 		char buf[512] = {0};
 		int ret;
 
-		tv.tv_usec = 0;
-		tv.tv_sec = 0;
+		fds.fd = fd;
+		fds.events = POLLIN;
 
-		ret = select(fd + 1, &set, NULL, NULL, &tv);
+		ret = safepoll(&fds, 1, 10);
 		if (ret == -1) {
 			RTE_LOG(ERR, EAL, "select() failed in virtio device\n");
 			break;
