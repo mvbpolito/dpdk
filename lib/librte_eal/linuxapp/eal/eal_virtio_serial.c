@@ -202,6 +202,8 @@ int rte_eal_virtio_init(void)
 		if (ret == -1) {
 			RTE_LOG(ERR, EAL, "Failed to read from virtio device\n");
 			break;
+		} else if (ret == 0) {
+			break;
 		}
 
 		RTE_LOG(DEBUG, EAL, "virtio_serial clean loop\n");
