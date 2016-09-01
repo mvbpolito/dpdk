@@ -83,6 +83,8 @@ process_host_request(char * buf, size_t len)
 	if (str == NULL)
 		goto error;
 
+	RTE_LOG(DEBUG, EAL, "%s()\n", __FUNCTION__);
+
 	err = sscanf(str, "action=%s", action);
 	if (err != 1)
 		goto error;
@@ -173,8 +175,7 @@ int rte_eal_virtio_init(void)
 
 	/* open device and configure it as async */
 	fd = open(VIRTIO_SERIAL_PATH, O_RDWR);
-	if (fd == -1)
-	{
+	if (fd == -1) {
 		RTE_LOG(ERR, EAL, "Cannot open '%s'!\n", VIRTIO_SERIAL_PATH);
 		return -1;
 	}
@@ -193,6 +194,7 @@ int rte_eal_virtio_init(void)
 			RTE_LOG(ERR, EAL, "select() failed in virtio device\n");
 			break;
 		} else if (ret == 0) {
+			RTE_LOG(DEBUG, EAL, "virtio_serial nothing else to clean\n");
 			break;
 		}
 
@@ -200,7 +202,11 @@ int rte_eal_virtio_init(void)
 		if (ret == -1) {
 			RTE_LOG(ERR, EAL, "Failed to read from virtio device\n");
 			break;
+		} else if (ret == 0) {
+			break;
 		}
+
+		RTE_LOG(DEBUG, EAL, "virtio_serial clean loop\n");
 	}
 
 	struct virtio_args *args = malloc(sizeof(*args));
