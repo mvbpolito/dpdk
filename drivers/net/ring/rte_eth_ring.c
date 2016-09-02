@@ -280,7 +280,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	static int nlast = 0; /*number of received packets in last operation */
 	static uint64_t old = 0; /* time of the first failed read operation */
 
-//	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
+	//RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
 
@@ -288,7 +288,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		for (i = 0; i < nb_rx; i++) {
 			if (buf_is_cap(bufs[i])) {
 
-				RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
+				RTE_LOG(INFO, PMD, "%s: rx_q->state = BYPASS_RX: (buf is cap)\n", __FUNCTION__);
 
 				rx_q->state = BYPASS_RX;
 				nb_rx--;
@@ -309,6 +309,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 				 * lost or the peer is not sending packets, anyway,
 				 * change to the next state
 				 */
+				 RTE_LOG(INFO, PMD, "%s: rx_q->state = BYPASS_RX: (timeout)\n", __FUNCTION__);
 				 rx_q->state = BYPASS_RX;
 			}
 		}
@@ -332,7 +333,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
 
-	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
+	//RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	static int nlast = 0; /*number of received packets in last operation */
 	static uint64_t old = 0; /* time of the first failed read operation */
@@ -354,7 +355,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		for (i = 0; i < nb_rx; i++) {
 			if (buf_is_cap(bufs[i])) {
 
-				RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
+				RTE_LOG(INFO, PMD, "%s: rx_q->state = NORMAL_RX: (buf is cap)\n", __FUNCTION__);
 
 				rx_q->state = NORMAL_RX;
 				nb_rx--;
@@ -375,6 +376,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 				 * lost or the peer is not sending packets, anyway,
 				 * change to the next state
 				 */
+				 RTE_LOG(INFO, PMD, "%s: rx_q->state = NORMAL_RX: (timeout)\n", __FUNCTION__);
 				 rx_q->state = NORMAL_RX;
 			}
 		}
