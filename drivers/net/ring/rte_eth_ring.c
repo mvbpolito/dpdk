@@ -144,8 +144,11 @@ send_cap_normal(void *q)
 	 * The userdata filed is fill with a particular memory adress, in this case
 	 * buf_is_cap
 	 */
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 5; i++) {
 		caps[i]->userdata = CAP_MAGIC;
+		caps[i]->pkt_len = 64;
+		caps[i]->data_len = 64;
+	}
 
 	ntosend = 5;
 	i = 0;
