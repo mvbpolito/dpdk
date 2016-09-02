@@ -50,7 +50,8 @@
 #define ETH_RING_ACTION_ATTACH		"ATTACH"
 
 #define CAP_MAGIC ((void *)0x444e7834082c83a7)
-#define CAP_TSC (rte_get_tsc_hz()/100)	/* 10 ms XXX: value to tune */
+#define CAP_MS 10
+#define CAP_TSC (CAP_MS*rte_get_tsc_hz()/1000)
 static const char *valid_arguments[] = {
 	ETH_RING_NUMA_NODE_ACTION_ARG,
 	NULL
