@@ -1029,6 +1029,9 @@ rte_eal_ivshmem_obj_init(void)
 		}
 	}
 
+	/* the pmd rings were created */
+	ivshmem_config->pmd_rings_cnt = 0;
+
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
 
 #ifdef RTE_LIBRTE_IVSHMEM_DEBUG
