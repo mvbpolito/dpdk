@@ -49,6 +49,8 @@
 #define ETH_RING_ACTION_CREATE		"CREATE"
 #define ETH_RING_ACTION_ATTACH		"ATTACH"
 
+int sched_getcpu(void);
+
 #define CAP_MAGIC ((void *)0x444e7834082c83a7)
 #define CAP_TSC (rte_get_tsc_hz()/100)	/* 10 ms XXX: value to tune */
 static const char *valid_arguments[] = {
@@ -871,6 +873,9 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	struct rx_ring_queue *rx_q;
 	struct tx_ring_queue *tx_q;
 	int errval;
+
+	RTE_LOG(INFO, PMD, "%s() executed on core: %d", 
+		__FUNCTION__, sched_getcpu());
 
 	if (!rte_eth_dev_is_valid_port(normal_id)) {
 		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", normal_id);
