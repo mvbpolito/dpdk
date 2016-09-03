@@ -63,6 +63,9 @@ struct rx_ring_queue {
 	uint64_t rx_pkts;
 	//uint64_t rx_bytes;
 	uint64_t rx_pkts_bypass; /* packets read from the bypass channel */
+
+	uint16_t nlast;	/* number of packets read on the last reading operation */
+	uint64_t old; /* last time 0 packets were read */
 };
 
 struct tx_ring_queue {
