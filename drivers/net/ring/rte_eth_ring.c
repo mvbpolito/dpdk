@@ -283,9 +283,6 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
 
-	static int nlast = 0; /*number of received packets in last operation */
-	static uint64_t old = 0; /* time of the first failed read operation */
-
 	//RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
@@ -305,12 +302,12 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 			}
 		}
 	} else {
-		if (nlast != 0) {
+		if (rx_q->nlast != 0) {
 			/* this is the first non succesful reading */
-			old = rte_get_timer_cycles();
+			rx_q->old = rte_get_timer_cycles();
 		} else {
 			/* last operation was also unsuccessful */
-			if ((rte_get_timer_cycles() - old) > CAP_TSC) {
+			if ((rte_get_timer_cycles() - rx_q->old) > CAP_TSC) {
 				/* the cap packet is taking so long for arrive, maybe it was
 				 * lost or the peer is not sending packets, anyway,
 				 * change to the next state
@@ -321,7 +318,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		}
 	}
 
-	nlast = nb_rx;
+	rx_q->nlast = nb_rx;
 	return nb_rx;
 }
 
@@ -340,9 +337,6 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 	uint16_t i;
 
 	//RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
-
-	static int nlast = 0; /*number of received packets in last operation */
-	static uint64_t old = 0; /* time of the first failed read operation */
 
 	/*
 	 * If the bypass port is not attached, read from the normal channel
@@ -372,12 +366,12 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 			}
 		}
 	} else {
-		if (nlast != 0) {
+		if (rx_q->nlast != 0) {
 			/* this is the first non succesful reading */
-			old = rte_get_timer_cycles();
+			rx_q->old = rte_get_timer_cycles();
 		} else {
 			/* last operation was also unsuccessful */
-			if ((rte_get_timer_cycles() - old) > CAP_TSC) {
+			if ((rte_get_timer_cycles() - rx_q->old) > CAP_TSC) {
 				/* the cap packet is taking so long for arrive, maybe it was
 				 * lost or the peer is not sending packets, anyway,
 				 * change to the next state
@@ -388,7 +382,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		}
 	}
 
-	nlast = nb_rx;
+	rx_q->nlast = nb_rx;
 	return nb_rx;
 }
 
@@ -943,6 +937,9 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 
 	internals->bypass_state = BYPASS_ATTACHED; /* bypass is being used */
 
+	/* suppose packets where received in last call */
+	rx_q->nlast = 1;
+
 	/* look for cap packet */
 	rx_q->state = CREATION_RX;
 
@@ -965,6 +962,10 @@ int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 	normal_port = &rte_eth_devices[normal_id];
 
 	rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
+
+	/* suppose we received packets on last call */
+	rx_q->nlast = 1;
+
 	/* look for cap packet */
 	rx_q->state = DESTRUCTION_RX;
 
