@@ -932,9 +932,6 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 
 	internals->bypass_state = BYPASS_ATTACHED; /* bypass is being used */
 
-	/* look for cap packet */
-	rx_q->state = CREATION_RX;
-
 	tx_q->tx_pkts_bypass = 0;
 	tx_q->err_pkts_bypass = 0;
 
@@ -954,9 +951,8 @@ int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 	normal_port = &rte_eth_devices[normal_id];
 
 	rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
-	/* look for cap packet */
-	rx_q->state = DESTRUCTION_RX;
 
+	/* is the timeout a good idea? */
 	schedule_timeout(close_bypass, normal_port->data->dev_private, 100000);
 
 	return 0;
