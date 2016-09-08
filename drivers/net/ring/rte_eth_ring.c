@@ -49,8 +49,11 @@
 #define ETH_RING_ACTION_CREATE		"CREATE"
 #define ETH_RING_ACTION_ATTACH		"ATTACH"
 
+int sched_getcpu(void);
+
 #define CAP_MAGIC ((void *)0x444e7834082c83a7)
-#define CAP_TSC (rte_get_tsc_hz()/100)	/* 10 ms XXX: value to tune */
+#define CAP_MS 10
+#define CAP_TSC (CAP_MS*rte_get_tsc_hz()/1000)
 static const char *valid_arguments[] = {
 	ETH_RING_NUMA_NODE_ACTION_ARG,
 	NULL
@@ -143,8 +146,11 @@ send_cap_normal(void *q)
 	 * The userdata filed is fill with a particular memory adress, in this case
 	 * buf_is_cap
 	 */
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 5; i++) {
 		caps[i]->userdata = CAP_MAGIC;
+		caps[i]->pkt_len = 64;
+		caps[i]->data_len = 64;
+	}
 
 	ntosend = 5;
 	i = 0;
@@ -277,10 +283,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
 
-	static int nlast = 0; /*number of received packets in last operation */
-	static uint64_t old = 0; /* time of the first failed read operation */
-
-//	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
+	//RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	uint16_t nb_rx = eth_ring_normal_rx(q, bufs, nb_bufs);
 
@@ -288,7 +291,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		for (i = 0; i < nb_rx; i++) {
 			if (buf_is_cap(bufs[i])) {
 
-				RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
+				RTE_LOG(INFO, PMD, "%s: rx_q->state = BYPASS_RX: (buf is cap)\n", __FUNCTION__);
 
 				rx_q->state = BYPASS_RX;
 				nb_rx--;
@@ -299,22 +302,23 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 			}
 		}
 	} else {
-		if (nlast != 0) {
+		if (rx_q->nlast != 0) {
 			/* this is the first non succesful reading */
-			old = rte_get_timer_cycles();
+			rx_q->old = rte_get_timer_cycles();
 		} else {
 			/* last operation was also unsuccessful */
-			if ((rte_get_timer_cycles() - old) > CAP_TSC) {
+			if ((rte_get_timer_cycles() - rx_q->old) > CAP_TSC) {
 				/* the cap packet is taking so long for arrive, maybe it was
 				 * lost or the peer is not sending packets, anyway,
 				 * change to the next state
 				 */
+				 RTE_LOG(INFO, PMD, "%s: rx_q->state = BYPASS_RX: (timeout)\n", __FUNCTION__);
 				 rx_q->state = BYPASS_RX;
 			}
 		}
 	}
 
-	nlast = nb_rx;
+	rx_q->nlast = nb_rx;
 	return nb_rx;
 }
 
@@ -332,10 +336,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		normal_port = &rte_eth_devices[rx_q->normal_id];
 	uint16_t i;
 
-	RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
-
-	static int nlast = 0; /*number of received packets in last operation */
-	static uint64_t old = 0; /* time of the first failed read operation */
+	//RTE_LOG(INFO, PMD, "---->%s\n", __FUNCTION__);
 
 	/*
 	 * If the bypass port is not attached, read from the normal channel
@@ -354,7 +355,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		for (i = 0; i < nb_rx; i++) {
 			if (buf_is_cap(bufs[i])) {
 
-				RTE_LOG(INFO, PMD, "%s: buf is cap\n", __FUNCTION__);
+				RTE_LOG(INFO, PMD, "%s: rx_q->state = NORMAL_RX: (buf is cap)\n", __FUNCTION__);
 
 				rx_q->state = NORMAL_RX;
 				nb_rx--;
@@ -365,22 +366,23 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 			}
 		}
 	} else {
-		if (nlast != 0) {
+		if (rx_q->nlast != 0) {
 			/* this is the first non succesful reading */
-			old = rte_get_timer_cycles();
+			rx_q->old = rte_get_timer_cycles();
 		} else {
 			/* last operation was also unsuccessful */
-			if ((rte_get_timer_cycles() - old) > CAP_TSC) {
+			if ((rte_get_timer_cycles() - rx_q->old) > CAP_TSC) {
 				/* the cap packet is taking so long for arrive, maybe it was
 				 * lost or the peer is not sending packets, anyway,
 				 * change to the next state
 				 */
+				 RTE_LOG(INFO, PMD, "%s: rx_q->state = NORMAL_RX: (timeout)\n", __FUNCTION__);
 				 rx_q->state = NORMAL_RX;
 			}
 		}
 	}
 
-	nlast = nb_rx;
+	rx_q->nlast = nb_rx;
 	return nb_rx;
 }
 
@@ -867,6 +869,9 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	struct tx_ring_queue *tx_q;
 	int errval;
 
+	RTE_LOG(INFO, PMD, "%s() executed on core: %d",
+		__FUNCTION__, sched_getcpu());
+
 	if (!rte_eth_dev_is_valid_port(normal_id)) {
 		RTE_LOG(ERR, PMD, "port id '%d' is not valid\n", normal_id);
 		return -1;
@@ -932,6 +937,12 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 
 	internals->bypass_state = BYPASS_ATTACHED; /* bypass is being used */
 
+	/* suppose packets where received in last call */
+	rx_q->nlast = 1;
+
+	/* look for cap packet */
+	rx_q->state = CREATION_RX;
+
 	tx_q->tx_pkts_bypass = 0;
 	tx_q->err_pkts_bypass = 0;
 
@@ -951,6 +962,12 @@ int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 	normal_port = &rte_eth_devices[normal_id];
 
 	rx_q = (struct rx_ring_queue *)normal_port->data->rx_queues[0];
+
+	/* suppose we received packets on last call */
+	rx_q->nlast = 1;
+
+	/* look for cap packet */
+	rx_q->state = DESTRUCTION_RX;
 
 	/* is the timeout a good idea? */
 	schedule_timeout(close_bypass, normal_port->data->dev_private, 100000);

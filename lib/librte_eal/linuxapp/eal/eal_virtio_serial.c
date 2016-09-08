@@ -1,5 +1,7 @@
 #ifdef RTE_LIBRTE_VIRTIO_SERIAL /* hide it from coverage */
 
+#define _GNU_SOURCE             /* See feature_test_macros(7) */
+
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -11,6 +13,10 @@
 #include <rte_ethdev.h>
 
 #include "eal_private.h"
+
+#define _GNU_SOURCE
+#include <pthread.h>
+#include <sched.h>
 
 #define VIRTIO_SERIAL_PATH "/dev/virtio-ports/dpdk"
 
@@ -212,6 +218,11 @@ int rte_eal_virtio_init(void)
 	struct virtio_args *args = malloc(sizeof(*args));
 	args->fd = fd;
 	pthread_attr_init(&attr);
+	cpu_set_t cpu;
+	CPU_ZERO(&cpu);
+	CPU_SET(0, &cpu);
+
+	pthread_attr_setaffinity_np(&attr, sizeof(cpu), &cpu);
 
 	pthread_create(&tid, &attr, rte_virtio_serial_handler, (void *)args);
 
