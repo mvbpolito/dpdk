@@ -135,28 +135,23 @@ send_cap_normal(void *q)
 	struct pmd_internals *internals = normal_port->data->dev_private;
 	struct rte_mempool *mb_pool = internals->rx_ring_queues[0].mb_pool;
 
-	struct rte_mbuf *caps[5] = {0};
+	struct rte_mbuf *cap = NULL;
 
-	int ret, i, ntosend;
+	int ret;
 	do {
-		ret = rte_mempool_get_bulk(mb_pool, (void **) caps, 5);
+		ret = rte_mempool_get(mb_pool, (void **) &cap);
 	} while(ret != 0);
 
 	/* it is the way to detect if the packets is an cap.
-	 * The userdata filed is fill with a particular memory adress, in this case
-	 * buf_is_cap
+	 * The userdata filed is fill with a particular constant value
 	 */
-	for (i = 0; i < 5; i++) {
-		caps[i]->userdata = CAP_MAGIC;
-		caps[i]->pkt_len = 64;
-		caps[i]->data_len = 64;
-	}
+	cap->userdata = CAP_MAGIC;
+	cap->pkt_len = 64;
+	cap->data_len = 64;
 
-	ntosend = 5;
-	i = 0;
 	do {
-		i += eth_ring_normal_tx(q, caps, ntosend - i);
-	} while(i < ntosend);
+		ret = eth_ring_normal_tx(q, &cap, 1);
+	} while (ret != 1);
 
 	tx_q->state = BYPASS_TX;
 
@@ -173,25 +168,24 @@ send_cap_bypass(void *q)
 	struct pmd_internals * internals = normal_port->data->dev_private;
 	struct rte_mempool *mb_pool = internals->rx_ring_queues[0].mb_pool;
 
-	struct rte_mbuf *caps[5] = {0};
+	struct rte_mbuf *cap = NULL;
 
-	int ret, i, ntosend;
+	int ret;
 	do {
-		ret = rte_mempool_get_bulk(mb_pool, (void **) caps, 5);
+		ret = rte_mempool_get(mb_pool, (void **) &cap);
 	} while(ret != 0);
 
 	/* it is the way to detect if the packets is an cap.
-	 * The userdata filed is fill with a particular memory adress, in this case
-	 * buf_is_cap
+	 * The userdata filed is fill with a particular constant
 	 */
-	for (i = 0; i < 5; i++)
-		caps[i]->userdata = CAP_MAGIC;
 
-	ntosend = 5;
-	i = 0;
+	cap->userdata = CAP_MAGIC;
+	cap->pkt_len = 64;
+	cap->data_len = 64;
+
 	do {
-		i += eth_ring_bypass_tx(q, caps, ntosend - i);
-	} while(i < ntosend);
+		ret = eth_ring_bypass_tx(q, &cap, 1);
+	} while(ret != 1);
 
 
 	tx_q->state = NORMAL_TX;
@@ -296,7 +290,7 @@ eth_ring_creation_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 				rx_q->state = BYPASS_RX;
 				nb_rx--;
 
-				/* XXX: remove and free the buffers that are still caps */
+				rte_pktmbuf_free(bufs[i]);
 
 				break;
 			}
@@ -360,7 +354,7 @@ eth_ring_destruction_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 				rx_q->state = NORMAL_RX;
 				nb_rx--;
 
-				/* XXX: remove and free the buffers that are still caps */
+				rte_pktmbuf_free(bufs[i]);
 
 				break;
 			}
