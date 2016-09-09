@@ -940,9 +940,6 @@ int rte_eth_ring_add_bypass_device(uint8_t normal_id, uint8_t bypass_id)
 	/* suppose packets where received in last call */
 	rx_q->nlast = 1;
 
-	/* look for cap packet */
-	rx_q->state = CREATION_RX;
-
 	tx_q->tx_pkts_bypass = 0;
 	tx_q->err_pkts_bypass = 0;
 
@@ -965,9 +962,6 @@ int rte_eth_ring_remove_bypass_device(uint8_t normal_id)
 
 	/* suppose we received packets on last call */
 	rx_q->nlast = 1;
-
-	/* look for cap packet */
-	rx_q->state = DESTRUCTION_RX;
 
 	/* is the timeout a good idea? */
 	schedule_timeout(close_bypass, normal_port->data->dev_private, 100000);
