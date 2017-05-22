@@ -71,6 +71,9 @@ EAL_REGISTER_TAILQ(rte_mempool_tailq)
 #define CALC_CACHE_FLUSHTHRESH(c)	\
 	((typeof(c))((c) * CACHE_FLUSHTHRESH_MULTIPLIER))
 
+/* XXX: should it be static? */
+struct mp_ioremap_entry mp_ioremap[16];
+
 /*
  * return the greatest common divisor between a and b (fast algorithm)
  *
@@ -918,4 +921,21 @@ void rte_mempool_walk(void (*func)(const struct rte_mempool *, void *),
 	}
 
 	rte_rwlock_read_unlock(RTE_EAL_MEMPOOL_RWLOCK);
+}
+
+void rte_mempool_add_ioremap_entry(struct rte_mempool *mp, phys_addr_t ioremap_addr)
+{
+	unsigned i = 0;
+	/* look for a free entry */
+	while (mp_ioremap[i++].mp) {
+		if (i == 16) {
+			RTE_LOG(ERR, MEMPOOL, "Not enough entries in mp_ioremap!\n");
+			return;
+		}
+	}
+
+	i--;
+
+	mp_ioremap[i].mp = mp;
+	mp_ioremap[i].ioremap_addr = ioremap_addr;
 }

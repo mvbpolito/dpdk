@@ -62,10 +62,10 @@
 #define RTE_IXGBE_DESCS_PER_LOOP    4
 
 #define RTE_MBUF_DATA_DMA_ADDR(mb) \
-	(uint64_t) ((mb)->buf_physaddr + (mb)->data_off)
+	(uint64_t) (rte_pktmbuf_get_phy_addr(mb) + (mb)->data_off)
 
 #define RTE_MBUF_DATA_DMA_ADDR_DEFAULT(mb) \
-	(uint64_t) ((mb)->buf_physaddr + RTE_PKTMBUF_HEADROOM)
+	(uint64_t) (rte_pktmbuf_get_phy_addr(mb) + RTE_PKTMBUF_HEADROOM)
 
 #ifdef RTE_IXGBE_INC_VECTOR
 #define RTE_IXGBE_RXQ_REARM_THRESH      32

@@ -53,6 +53,7 @@
 #include <rte_malloc.h>
 #include <rte_common.h>
 #include <rte_ivshmem.h>
+#include <rte_mbuf.h>
 
 #include <rte_ethdev.h>
 #include <rte_eth_ring.h>
@@ -1003,6 +1004,8 @@ rte_eal_ivshmem_obj_init(void)
 				RTE_LOG(ERR, EAL, "Cannot allocate mempool tailq entry!\n");
 				return -1;
 			}
+
+			rte_mempool_add_ioremap_entry(mp, mcfg->memzone[idx].ioremap_addr + (mp->elt_va_start - (uintptr_t)mp));
 
 			te->data = (void *) mp;
 

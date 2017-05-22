@@ -1858,6 +1858,15 @@ static inline int rte_pktmbuf_chain(struct rte_mbuf *head, struct rte_mbuf *tail
  */
 void rte_pktmbuf_dump(FILE *f, const struct rte_mbuf *m, unsigned dump_len);
 
+static inline phys_addr_t rte_pktmbuf_get_phy_addr(struct rte_mbuf *mb)
+{
+	if (mb->buf_physaddr)
+		return mb->buf_physaddr;
+
+	return rte_mempool_virt2guestphy(mb->pool, mb) + \
+			sizeof(struct rte_mbuf) + mb->priv_size;
+}
+
 #ifdef __cplusplus
 }
 #endif

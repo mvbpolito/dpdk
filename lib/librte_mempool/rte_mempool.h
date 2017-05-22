@@ -148,6 +148,13 @@ struct rte_mempool_objsz {
 
 #define RTE_MEMPOOL_ALIGN_MASK	(RTE_MEMPOOL_ALIGN - 1)
 
+struct mp_ioremap_entry {
+	struct rte_mempool *mp;
+	phys_addr_t ioremap_addr;
+};
+
+extern struct mp_ioremap_entry mp_ioremap[];
+
 /**
  * Mempool object header structure
  *
@@ -1270,6 +1277,28 @@ rte_mempool_virt2phy(const struct rte_mempool *mp, const void *elt)
 		return rte_mem_virt2phy(elt);
 	}
 }
+
+static inline phys_addr_t
+rte_mempool_virt2guestphy(const struct rte_mempool *mp, const void *elt)
+{
+	/* XXX: what about if there are not hugepages? */
+	uintptr_t off;
+
+	off = (const char *)elt - (const char *)mp->elt_va_start;
+
+	unsigned i = 0;
+
+	while (mp_ioremap[i].mp) {
+		if (mp_ioremap[i].mp == mp)
+			return mp_ioremap[i].ioremap_addr + off;
+
+		i++;
+	}
+
+	return 0;
+}
+
+void rte_mempool_add_ioremap_entry(struct rte_mempool *mp, phys_addr_t ioremap_addr);
 
 /**
  * Check the consistency of mempool objects.
